@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-2xl font-bold">Backtest Reports</h1>
+    <p class="text-sm" style="color: var(--muted);">Deterministic replays · <span style="color: #fbbf24;">⚠</span> = window overlaps LLM training data.</p>
+  </div>
+</div>
+
+<div class="card overflow-hidden">
+{% if reports %}
+  <table class="htable">
+    <thead>
+      <tr>
+        <th>ID</th><th>Strategy</th><th>Window</th>
+        <th class="r">Trades</th><th class="r">Return</th><th class="r">Win %</th>
+        <th class="r">Sharpe</th><th class="r">Max DD</th><th>Memo</th><th>When</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in reports %}
+      <tr>
+        <td><a class="link mono" href="/backtests/{{ r.id }}">#{{ r.id }}</a></td>
+        <td class="mono">{{ r.strategy_id }}</td>
+        <td class="dim">{{ r.start_date }} → {{ r.end_date }}</td>
+        <td class="r num">{{ r.n_trades }}</td>
+        <td class="r num {% if r.total_return >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ "%+.2f"|format(r.total_return * 100) }}%</td>
+        <td class="r num">{{ "%.0f"|format(r.win_rate * 100) }}%</td>
+        <td class="r num">{% if r.sharpe is not none %}{{ "%.2f"|format(r.sharpe) }}{% else %}<span class="dim">—</span>{% endif %}</td>
+        <td class="r num">{{ "%.2f"|format(r.max_drawdown * 100) }}%</td>
+        <td>{% if r.contaminated %}<span title="{{ r.contamination_notes }}" style="color: #fbbf24;">⚠</span>{% else %}<span class="dim">·</span>{% endif %}</td>
+        <td class="dim mono">{{ r.created_at[:19] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <div class="empty"><div class="empty-title">No backtest reports yet</div>
+    <div class="empty-hint">Run <code>heron backtest run &lt;strategy&gt;</code>.</div></div>
+{% endif %}
+</div>
+{% endblock %}

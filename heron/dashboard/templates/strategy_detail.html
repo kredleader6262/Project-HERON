@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% block title %}{{ strategy.name }} — HERON{% endblock %}
+{% block content %}
+<div class="mb-5">
+  <div class="flex items-center gap-3 mb-1">
+    <h1 class="text-2xl font-bold">{{ strategy.name }}</h1>
+    <span class="pill s-{{ strategy.state }}">{{ strategy.state }}</span>
+    {% if strategy.is_baseline %}<span class="pill pill-brand">baseline</span>{% endif %}
+  </div>
+  <p class="text-sm mono" style="color: var(--muted);">{{ strategy.id }}</p>
+  {% if strategy.description %}<p class="text-sm mt-2" style="color: var(--text);">{{ strategy.description }}</p>{% endif %}
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="card stat"><div class="stat-label">Max Capital</div><div class="stat-value num">{{ "%.0f"|format(strategy.max_capital_pct * 100) }}%</div></div>
+  <div class="card stat"><div class="stat-label">Max Positions</div><div class="stat-value num">{{ strategy.max_positions }}</div></div>
+  <div class="card stat"><div class="stat-label">DD Budget</div><div class="stat-value num">{{ "%.0f"|format(strategy.drawdown_budget_pct * 100) }}%</div></div>
+  <div class="card stat"><div class="stat-label">Min Hold</div><div class="stat-value num">{{ strategy.min_hold_days }}d</div></div>
+</div>
+
+{% if strategy.rationale %}
+<div class="card p-4 mb-6" style="border-left: 3px solid var(--info);">
+  <div class="section-title">Rationale</div>
+  <div class="text-sm">{{ strategy.rationale }}</div>
+</div>
+{% endif %}
+
+<div class="section-title">State history</div>
+<div class="card overflow-hidden mb-6">
+  {% if history %}
+  <table class="htable">
+    <thead><tr><th>Time</th><th>From</th><th>To</th><th>Reason</th><th>By</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr>
+        <td class="dim mono">{{ h.ts[:19] }}</td>
+        <td class="dim">{{ h.from_state or "—" }}</td>
+        <td><span class="pill s-{{ h.to_state }}">{{ h.to_state }}</span></td>
+        <td>{{ h.reason or "" }}</td>
+        <td class="dim">{{ h.operator }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No state transitions recorded.</div>{% endif %}
+</div>
+
+<div class="section-title">Trades ({{ trades|length }})</div>
+<div class="card overflow-hidden mb-6">
+  {% if trades %}
+  <table class="htable">
+    <thead><tr><th>Ticker</th><th>Side</th><th>Mode</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Exit</th><th class="r">P&amp;L</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td class="mono font-semibold">{{ t.ticker }}</td>
+        <td><span class="pill pill-{{ 'ok' if t.side == 'buy' else 'err' }}">{{ t.side }}</span></td>
+        <td><span class="pill pill-{{ 'info' if t.mode == 'paper' else 'brand' }}">{{ t.mode }}</span></td>
+        <td class="r num">{{ t.qty }}</td>
+        <td class="r num">${{ "%.2f"|format(t.fill_price or 0) }}</td>
+        <td class="r num">{% if t.close_price %}${{ "%.2f"|format(t.close_price) }}{% else %}<span class="dim">open</span>{% endif %}</td>
+        <td class="r num {% if t.pnl and t.pnl > 0 %}pnl-pos{% elif t.pnl and t.pnl < 0 %}pnl-neg{% endif %}">
+          {% if t.pnl is not none %}${{ "%+.2f"|format(t.pnl) }}{% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="dim">{{ t.close_reason or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No trades yet.</div>{% endif %}
+</div>
+
+<div class="section-title">Candidates ({{ candidates|length }})</div>
+<div class="card overflow-hidden">
+  {% if candidates %}
+  <table class="htable">
+    <thead><tr><th>Ticker</th><th>Source</th><th class="r">Score</th><th>Disposition</th><th>Thesis</th></tr></thead>
+    <tbody>
+    {% for c in candidates %}
+      <tr>
+        <td class="mono font-semibold">{{ c.ticker }}</td>
+        <td class="dim mono">{{ c.source or "" }}</td>
+        <td class="r num">{{ "%.2f"|format(c.final_score or c.local_score or 0) }}</td>
+        <td><span class="pill pill-{% if c.disposition == 'accepted' %}ok{% elif c.disposition == 'rejected' %}err{% else %}warn{% endif %}">{{ c.disposition }}</span></td>
+        <td class="dim" style="max-width: 420px;">{{ (c.thesis or "")[:100] }}{% if (c.thesis or '')|length > 100 %}…{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No candidates generated for this strategy.</div>{% endif %}
+</div>
+{% endblock %}

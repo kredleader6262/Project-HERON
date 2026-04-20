@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}HERON — Strategy Inbox{% endblock %}
+{% block content %}
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-2xl font-bold">Strategy Inbox</h1>
+    <p class="text-sm" style="color: var(--muted);">Operator-gated approvals for new strategies and pending candidates.</p>
+  </div>
+</div>
+
+{% if proposed %}
+<div class="section-title">Awaiting approval ({{ proposed|length }})</div>
+{% for s in proposed %}
+<div class="card p-5 mb-4">
+  <div class="flex justify-between items-start">
+    <div>
+      <h3 class="font-bold text-lg">{{ s.name }}</h3>
+      <div class="text-xs mono" style="color: var(--muted);">{{ s.id }} · proposed {{ s.created_at[:10] }}</div>
+    </div>
+    <span class="pill s-PROPOSED">PROPOSED</span>
+  </div>
+
+  {% if s.description %}
+  <p class="mt-3 text-sm" style="color: var(--text);">{{ s.description }}</p>
+  {% endif %}
+
+  {% if s.rationale %}
+  <div class="mt-3 p-3 rounded text-sm" style="background: #0d1423; border: 1px solid var(--border);">
+    <div class="section-title" style="margin-bottom: 0.3rem;">Rationale</div>
+    <div>{{ s.rationale }}</div>
+  </div>
+  {% endif %}
+
+  <div class="mt-3 flex gap-4 text-sm num" style="color: var(--muted);">
+    <span>Cap: <span style="color: var(--text);">{{ "%.0f"|format(s.max_capital_pct * 100) }}%</span></span>
+    <span>Max Pos: <span style="color: var(--text);">{{ s.max_positions }}</span></span>
+    <span>DD Budget: <span style="color: var(--text);">{{ "%.0f"|format(s.drawdown_budget_pct * 100) }}%</span></span>
+    <span>Min Hold: <span style="color: var(--text);">{{ s.min_hold_days }}d</span></span>
+  </div>
+
+  <div class="mt-4 flex gap-2">
+    <form method="post" action="{{ url_for('approve_strategy', strategy_id=s.id) }}">
+      <input type="hidden" name="reason" value="Operator approved via dashboard">
+      <button type="submit" class="btn btn-ok">Approve → Paper</button>
+    </form>
+    <form method="post" action="{{ url_for('reject_strategy', strategy_id=s.id) }}">
+      <input type="hidden" name="reason" value="Operator rejected via dashboard">
+      <button type="submit" class="btn btn-danger">Reject</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% else %}
+<div class="card">
+  <div class="empty">
+    <div class="empty-title">No strategies awaiting approval</div>
+    <div class="empty-hint">New proposals arrive via <code>heron research propose</code> or periodic research passes.</div>
+  </div>
+</div>
+{% endif %}
+
+{% if recent_retired %}
+<div class="section-title mt-8">Recently retired</div>
+<div class="card overflow-hidden">
+  <table class="htable">
+    <thead><tr><th>ID</th><th>Name</th><th>Retired</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for s in recent_retired %}
+      <tr>
+        <td><a class="link mono" href="{{ url_for('strategy_detail', strategy_id=s.id) }}">{{ s.id }}</a></td>
+        <td>{{ s.name }}</td>
+        <td class="dim mono">{{ (s.retired_at or '')[:10] }}</td>
+        <td class="dim">{{ s.retired_reason or '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

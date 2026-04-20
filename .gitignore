@@ -15,6 +15,12 @@ build/
 *.db
 *.db-wal
 *.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Runtime data (cache, alert state, etc.) — keep .gitkeep / docs
+data/*.json
 
 # IDE
 .vscode/
@@ -29,5 +35,18 @@ Thumbs.db
 # Ollama model cache (if local)
 models/
 
+# Repo-local Ollama install (huge binaries + models)
+tools/ollama/
+tools/ollama-models/
+tools/ollama.pid
+tools/ollama.log
+
 # Backup artifacts
 *.bak
+
+.venv/
+.pytest_cache/
+
+# Logs
+logs/
+*.log

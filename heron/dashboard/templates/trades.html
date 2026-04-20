@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Trades — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Trades</h1>
+    <p class="lede">{{ trades|length }} entries · {{ mode_label }} mode</p>
+  </div>
+</div>
+
+<div class="card overflow-hidden">
+  {% if trades %}
+  <table class="htable">
+    <thead>
+      <tr>
+        <th>Ticker</th><th>Strategy</th><th>Side</th>
+        <th class="r">Qty</th><th class="r">Entry</th><th class="r">Exit</th><th class="r">P&amp;L</th>
+        <th>Reason</th><th>Date</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td class="mono font-semibold">{{ t.ticker }}</td>
+        <td><a class="link mono" href="/strategy/{{ t.strategy_id }}">{{ t.strategy_id }}</a></td>
+        <td><span class="chip chip-{{ 'up' if t.side == 'buy' else 'down' }}">{{ t.side }}</span></td>
+        <td class="r num">{{ t.qty }}</td>
+        <td class="r num">${{ "%.2f"|format(t.fill_price or 0) }}</td>
+        <td class="r num">{% if t.close_price %}${{ "%.2f"|format(t.close_price) }}{% else %}<span class="dim">open</span>{% endif %}</td>
+        <td class="r num {% if t.pnl and t.pnl > 0 %}pnl-pos{% elif t.pnl and t.pnl < 0 %}pnl-neg{% endif %}">
+          {% if t.pnl is not none %}${{ "%+.2f"|format(t.pnl) }}{% else %}<span class="dim">—</span>{% endif %}
+        </td>
+        <td class="dim">{{ t.close_reason or "" }}</td>
+        <td class="dim mono">{{ t.created_at[:10] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No trades in {{ mode_label }} mode</div>
+    <div class="empty-hint">Switch mode in the top rail to see another view, or accept candidates to generate trades.</div></div>
+  {% endif %}
+</div>
+{% endblock %}

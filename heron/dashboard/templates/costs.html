@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-2xl font-bold">Cost Tracking · {{ budget.year_month }}</h1>
+    <p class="text-sm" style="color: var(--muted);">{{ budget.reason }}</p>
+  </div>
+  {% if not budget.research_allowed %}
+    <span class="pill pill-err">Research halted</span>
+  {% else %}
+    <span class="pill pill-{% if budget.status == 'tripped' %}err{% elif budget.status == 'warning' %}warn{% else %}ok{% endif %}">{{ budget.status }}</span>
+  {% endif %}
+</div>
+
+{% set state = 'err' if budget.status == 'tripped' else ('warn' if budget.status == 'warning' else 'ok') %}
+<div class="card p-5 mb-6" style="border-left: 3px solid
+  {% if budget.status == 'tripped' %}var(--err)
+  {% elif budget.status == 'warning' %}var(--warn)
+  {% else %}var(--ok){% endif %};">
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-5 mb-4">
+    <div><div class="stat-label">MTD</div><div class="stat-value num">${{ "%.2f"|format(budget.mtd) }}</div></div>
+    <div><div class="stat-label">Projected</div><div class="stat-value num">${{ "%.2f"|format(budget.projected) }}</div></div>
+    <div><div class="stat-label">Ceiling</div><div class="stat-value num">${{ "%.2f"|format(budget.ceiling) }}</div></div>
+    <div><div class="stat-label">Day</div><div class="stat-value num">{{ budget.days_elapsed }} / {{ budget.days_in_month }}</div></div>
+  </div>
+  {% set pct = (budget.pct_projected * 100) | round(1) %}
+  {% set pct_capped = 100 if pct > 100 else pct %}
+  <div class="bar bar-{{ state }}">
+    <div style="width: {{ pct_capped }}%; min-width: {% if pct_capped > 0 %}4px{% else %}0{% endif %};"></div>
+  </div>
+  <div class="text-xs mt-2" style="color: var(--muted);">
+    {% if pct < 0.1 %}<span class="num">&lt;0.1%</span> of ceiling projected (negligible)
+    {% else %}<span class="num">{{ pct }}%</span> of ceiling projected{% endif %}
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="card overflow-hidden">
+    <div class="px-4 py-3" style="border-bottom: 1px solid var(--border);"><div class="section-title" style="margin: 0;">By model</div></div>
+    {% if by_model %}
+    <table class="htable">
+      <thead><tr><th>Model</th><th class="r">Cost</th><th class="r">Tokens in/out</th><th class="r">Calls</th></tr></thead>
+      <tbody>
+      {% for m in by_model %}
+        <tr>
+          <td class="mono">{{ m.model }}</td>
+          <td class="r num">${{ "%.4f"|format(m.cost) }}</td>
+          <td class="r num dim">{{ m.toks_in or 0 }} / {{ m.toks_out or 0 }}</td>
+          <td class="r num">{{ m.n }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty empty-hint">No usage this month.</div>{% endif %}
+  </div>
+
+  <div class="card overflow-hidden">
+    <div class="px-4 py-3" style="border-bottom: 1px solid var(--border);"><div class="section-title" style="margin: 0;">By strategy</div></div>
+    {% if by_strategy %}
+    <table class="htable">
+      <thead><tr><th>Strategy</th><th class="r">Cost</th><th class="r">Calls</th></tr></thead>
+      <tbody>
+      {% for s in by_strategy %}
+        <tr>
+          <td class="mono">{{ s.strategy_id }}</td>
+          <td class="r num">${{ "%.4f"|format(s.cost) }}</td>
+          <td class="r num">{{ s.n }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty empty-hint">No attributed usage.</div>{% endif %}
+  </div>
+</div>
+
+<div class="card overflow-hidden">
+  <div class="px-4 py-3" style="border-bottom: 1px solid var(--border);"><div class="section-title" style="margin: 0;">Daily usage</div></div>
+  {% if daily %}
+  <table class="htable">
+    <thead><tr><th>Date</th><th class="r">Cost</th><th class="r">Tokens in</th><th class="r">Tokens out</th></tr></thead>
+    <tbody>
+    {% for d in daily %}
+      <tr>
+        <td class="mono">{{ d.date }}</td>
+        <td class="r num">${{ "%.4f"|format(d.cost) }}</td>
+        <td class="r num dim">{{ d.toks_in or 0 }}</td>
+        <td class="r num dim">{{ d.toks_out or 0 }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No activity this month.</div>{% endif %}
+</div>
+{% endblock %}

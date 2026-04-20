@@ -1,0 +1,91 @@
+# Project HERON — Configuration
+# See Project-HERON.md for full specification.
+
+watchlist:
+  # Section 8.1 — 12 tickers
+  mega_cap: [AAPL, MSFT, GOOGL, AMZN, NVDA, META]
+  broad_etfs: [SPY, QQQ, IWM, DIA]
+  sector_etfs: [XLF, XLE]
+
+# Section 5.4.1 — Substantially identical securities for wash-sale tracking
+ticker_families:
+  sp500: [SPY, VOO, IVV]
+  nasdaq100: [QQQ, QQQM]
+  russell2000: [IWM, VTWO]
+  # DIA, XLF, XLE, and individual stocks are each their own family
+
+timeframes: ["1Day"]  # expand later: 5Min, 15Min, 1Hour
+
+data:
+  cache_dir: data
+  cache_db: heron.db
+  quote_stale_seconds: 10
+
+news_sources:
+  - name: alpaca_news
+    weight: 0.8
+    enabled: true
+
+  - name: sec_edgar_8k
+    weight: 1.0
+    url: "https://efts.sec.gov/LATEST/search-index?q=%228-K%22&dateRange=custom&startdt={start}&enddt={end}&forms=8-K"
+    feed_url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=8-K&dateb=&owner=include&count=40&search_text=&action=getcurrent&output=atom"
+    enabled: true
+
+  - name: sec_edgar_10q
+    weight: 1.0
+    feed_url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=10-Q&dateb=&owner=include&count=40&search_text=&action=getcurrent&output=atom"
+    enabled: true
+
+  - name: sec_edgar_10k
+    weight: 1.0
+    feed_url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=10-K&dateb=&owner=include&count=40&search_text=&action=getcurrent&output=atom"
+    enabled: true
+
+  - name: sec_edgar_form4
+    weight: 0.7
+    feed_url: "https://www.sec.gov/cgi-bin/browse-edgar?action=getcurrent&type=4&dateb=&owner=include&count=40&search_text=&action=getcurrent&output=atom"
+    enabled: true
+
+  - name: federal_reserve
+    weight: 1.0
+    feed_url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    enabled: true
+
+  - name: us_treasury
+    weight: 1.0
+    feed_url: "https://home.treasury.gov/system/files/136/press-rss.xml"
+    enabled: true
+
+  - name: bls
+    weight: 0.9
+    feed_url: "https://www.bls.gov/feed/bls_latest.rss"
+    enabled: true
+
+  - name: seeking_alpha
+    weight: 0.4
+    feed_url: "https://seekingalpha.com/market_currents.xml"
+    enabled: true
+
+cost:
+  monthly_ceiling_usd: 45.0
+
+audit:
+  # Memorization guard — only audit events dated strictly after these cutoffs.
+  local_model_cutoff: "2024-06-01"   # Qwen 2.5 cutoff (approx)
+  claude_cutoff: "2025-03-01"        # Claude 4 cutoff (approx)
+  # Trust score rolling window + minimum sample size to report a score.
+  trust_window_days: 30
+  trust_min_samples: 10
+  trust_threshold: 0.70              # operator review if below
+  # Max post-mortems per day (cost + compute guard)
+  post_mortem_daily_limit: 5
+
+alerts:
+  rate_limit_minutes: 10   # one alert per category per window
+  state_file: alert_state.json
+
+schedule:
+  premarket: "06:30"    # ET
+  midday: "12:30"       # ET
+  eod_debrief: "16:30"  # ET

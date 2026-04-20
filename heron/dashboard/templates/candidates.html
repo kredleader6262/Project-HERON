@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Candidates — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Candidates</h1>
+    <p class="lede">{{ candidates|length }} entries · {{ mode_label }} mode{% if disposition %} · <span class="mono">{{ disposition }}</span>{% endif %}</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/candidates" class="filter-pill {% if not disposition %}active{% endif %}">All</a>
+    <a href="/candidates?disposition=pending" class="filter-pill {% if disposition == 'pending' %}active{% endif %}">Pending</a>
+    <a href="/candidates?disposition=accepted" class="filter-pill {% if disposition == 'accepted' %}active{% endif %}">Accepted</a>
+    <a href="/candidates?disposition=rejected" class="filter-pill {% if disposition == 'rejected' %}active{% endif %}">Rejected</a>
+  </div>
+</div>
+
+<div class="card overflow-hidden">
+  {% if candidates %}
+  <table class="htable">
+    <thead>
+      <tr>
+        <th>Ticker</th><th>Strategy</th><th>Source</th>
+        <th class="r">Local</th><th class="r">API</th><th class="r">Final</th>
+        <th>Disposition</th><th>Thesis</th><th>Date</th><th class="r">Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for c in candidates %}
+      <tr>
+        <td class="mono font-semibold"><a class="link" href="/candidate/{{ c.id }}">{{ c.ticker }}</a></td>
+        <td><a class="link mono" href="/strategy/{{ c.strategy_id }}">{{ c.strategy_id }}</a></td>
+        <td class="dim mono">{{ c.source or "" }}</td>
+        <td class="r num">{{ "%.2f"|format(c.local_score) if c.local_score else '—' }}</td>
+        <td class="r num">{{ "%.2f"|format(c.api_score) if c.api_score else '—' }}</td>
+        <td class="r num">{{ "%.2f"|format(c.final_score) if c.final_score else '—' }}</td>
+        <td><span class="pill pill-{% if c.disposition == 'accepted' %}ok{% elif c.disposition == 'rejected' %}err{% else %}warn{% endif %}">{{ c.disposition }}</span></td>
+        <td class="dim" style="max-width: 360px;">{{ (c.thesis or "")[:90] }}{% if (c.thesis or '')|length > 90 %}…{% endif %}</td>
+        <td class="dim mono">{{ c.created_at[:10] }}</td>
+        <td class="r">
+          {% if c.disposition == 'pending' %}
+            <div style="display: inline-flex; gap: 0.3rem;">
+              <form action="/candidate/{{ c.id }}/accept" method="post" style="display: inline;">
+                <button type="submit" class="btn btn-ok" style="padding: 0.3rem 0.7rem; font-size: 0.75rem;" title="Accept">✓</button>
+              </form>
+              <form action="/candidate/{{ c.id }}/reject" method="post" style="display: inline;">
+                <button type="submit" class="btn btn-danger" style="padding: 0.3rem 0.7rem; font-size: 0.75rem;" title="Reject">✗</button>
+              </form>
+            </div>
+          {% else %}<span class="dim">—</span>{% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No candidates match this filter</div>
+    <div class="empty-hint">Candidates are produced by <code>heron research run</code>.</div></div>
+  {% endif %}
+</div>
+{% endblock %}

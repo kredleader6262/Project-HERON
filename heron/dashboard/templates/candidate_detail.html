@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Candidate #{{ c.id }} {{ c.ticker }} — HERON{% endblock %}
+{% block content %}
+
+<div class="mb-4">
+  <a href="/candidates" class="link text-sm">← All candidates</a>
+</div>
+
+<div class="flex items-center gap-3 mb-5 flex-wrap">
+  <h1 class="text-2xl font-bold mono">{{ c.ticker }}</h1>
+  <span class="pill pill-{% if c.disposition == 'accepted' %}ok{% elif c.disposition == 'rejected' %}err{% else %}warn{% endif %}">{{ c.disposition }}</span>
+  <span class="pill pill-brand mono">{{ c.strategy_id }}</span>
+  <span class="mono dim" style="font-size: 0.82rem;">#{{ c.id }}</span>
+  <span class="mono dim" style="font-size: 0.82rem; margin-left: auto;">{{ c.created_at[:19] }}</span>
+</div>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+  <div class="card stat">
+    <div class="stat-label">Source</div>
+    <div class="stat-value mono" style="font-size: 1rem;">{{ c.source or "—" }}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Local Score</div>
+    <div class="stat-value num">{{ "%.2f"|format(c.local_score) if c.local_score else "—" }}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">API Score</div>
+    <div class="stat-value num">{{ "%.2f"|format(c.api_score) if c.api_score else "—" }}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Final Score</div>
+    <div class="stat-value num">{{ "%.2f"|format(c.final_score) if c.final_score else "—" }}</div>
+  </div>
+</div>
+
+{% if c.disposition == 'pending' %}
+<div class="card p-4 mb-5" style="border-left: 3px solid var(--warn);">
+  <div class="section-title">Operator decision</div>
+  <div class="flex gap-2 mt-2">
+    <form action="/candidate/{{ c.id }}/accept" method="post">
+      <button type="submit" class="btn btn-ok">✓ Accept</button>
+    </form>
+    <form action="/candidate/{{ c.id }}/reject" method="post" class="flex gap-2">
+      <input type="text" name="reason" placeholder="Reason (optional)"
+             style="background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 0.4rem 0.6rem; border-radius: 6px; min-width: 16rem;">
+      <button type="submit" class="btn btn-danger">✗ Reject</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% if c.thesis %}
+<div class="card p-4 mb-5" style="border-left: 3px solid var(--info);">
+  <div class="section-title">Thesis</div>
+  <div style="font-size: 0.9rem; line-height: 1.55; color: var(--text); white-space: pre-wrap;">{{ c.thesis }}</div>
+</div>
+{% endif %}
+
+{% if c.rejection_reason %}
+<div class="card p-4 mb-5" style="border-left: 3px solid var(--err);">
+  <div class="section-title" style="color: var(--err);">Rejection reason</div>
+  <div style="font-size: 0.88rem;">{{ c.rejection_reason }}</div>
+</div>
+{% endif %}
+
+<div class="section-title">Related LLM audits ({{ audits|length }})</div>
+<div class="card p-4">
+  {% if audits %}
+    {% for a in audits %}
+    <details style="border-bottom: 1px solid var(--border); padding: 0.75rem 0;"{% if loop.first %} open{% endif %}>
+      <summary style="cursor: pointer; display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        <span class="pill pill-{% if a.divergence %}warn{% else %}ok{% endif %}">{{ a.audit_type }}</span>
+        {% if a.divergence %}<span class="pill pill-err">divergence</span>{% endif %}
+        <span class="mono dim" style="font-size: 0.78rem; margin-left: auto;">{{ a.created_at[5:19] }}</span>
+      </summary>
+      <div class="grid gap-3 mt-3 {% if a.local_output and a.api_output %}md:grid-cols-2{% endif %}">
+        {% if a.local_output %}
+        <div>
+          <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--brand); margin-bottom: 0.3rem;">● LOCAL (Qwen)</div>
+          <pre style="background: #0d1423; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.78rem; color: var(--text); white-space: pre-wrap; max-height: 320px; overflow-y: auto; font-family: 'JetBrains Mono', monospace;">{{ a.local_output }}</pre>
+        </div>
+        {% endif %}
+        {% if a.api_output %}
+        <div>
+          <div style="font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.08em; color: #c084fc; margin-bottom: 0.3rem;">● API (Claude)</div>
+          <pre style="background: #0d1423; border: 1px solid var(--border); border-radius: 6px; padding: 0.75rem; font-size: 0.78rem; color: var(--text); white-space: pre-wrap; max-height: 320px; overflow-y: auto; font-family: 'JetBrains Mono', monospace;">{{ a.api_output }}</pre>
+        </div>
+        {% endif %}
+      </div>
+      {% if a.notes %}
+      <div class="mt-2" style="font-size: 0.82rem; color: var(--muted);">
+        <strong style="color: var(--text);">Notes:</strong> {{ a.notes }}
+      </div>
+      {% endif %}
+    </details>
+    {% endfor %}
+  {% else %}
+  <div class="empty empty-hint">No audits recorded for this candidate.</div>
+  {% endif %}
+</div>
+
+{% endblock %}

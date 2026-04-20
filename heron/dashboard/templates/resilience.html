@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-2xl font-bold">Resilience</h1>
+    <p class="text-sm" style="color: var(--muted);">Startup audits, graceful shutdowns, and secrets hygiene.</p>
+  </div>
+</div>
+
+<div class="card p-5 mb-6" style="border-left: 3px solid
+  {% if secrets.status == 'clean' %}var(--ok){% else %}var(--warn){% endif %};">
+  <div class="flex items-start justify-between">
+    <div>
+      <div class="section-title">Secrets hygiene</div>
+      <div class="text-sm mt-1">
+        Env file: <span class="num">{{ secrets.env_file.status }}</span>
+        {% if secrets.env_file.note %}<span class="dim"> — {{ secrets.env_file.note }}</span>{% endif %}
+      </div>
+      <div class="text-sm">Env vars: <span class="num">{{ secrets.env_vars.status }}</span></div>
+      {% if secrets.env_vars.missing_required %}
+      <div class="text-sm pnl-neg mt-1">Missing required: {{ secrets.env_vars.missing_required|join(', ') }}</div>
+      {% endif %}
+      {% if secrets.env_vars.missing_optional %}
+      <div class="text-sm dim mt-1">Missing optional: {{ secrets.env_vars.missing_optional|join(', ') }}</div>
+      {% endif %}
+      {% if secrets.issues %}
+      <ul class="mt-2 text-sm" style="color: #fbbf24; list-style: disc; margin-left: 1.2rem;">
+        {% for i in secrets.issues %}<li>{{ i }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+    <span class="pill pill-{{ 'ok' if secrets.status == 'clean' else 'warn' }}">{{ secrets.status }}</span>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+  <div class="card overflow-hidden">
+    <div class="px-4 py-3" style="border-bottom: 1px solid var(--border);"><div class="section-title" style="margin: 0;">Startup audits · last 10</div></div>
+    {% if startups %}
+    <table class="htable">
+      <thead><tr><th>When</th><th>Status</th><th class="r">Issues</th></tr></thead>
+      <tbody>
+      {% for s in startups %}
+        {% set st = s.details.status or 'unknown' %}
+        <tr>
+          <td class="dim mono">{{ s.created_at[:19] }}</td>
+          <td><span class="pill pill-{% if st == 'clean' %}ok{% elif st == 'drift' %}warn{% else %}err{% endif %}">{{ st }}</span></td>
+          <td class="r num">{{ s.details.issues|length if s.details.issues else 0 }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty empty-hint">No startup audits recorded.</div>{% endif %}
+  </div>
+
+  <div class="card overflow-hidden">
+    <div class="px-4 py-3" style="border-bottom: 1px solid var(--border);"><div class="section-title" style="margin: 0;">Graceful shutdowns · last 10</div></div>
+    {% if shutdowns %}
+    <table class="htable">
+      <thead><tr><th>When</th><th class="r">Open trades</th><th>Message</th></tr></thead>
+      <tbody>
+      {% for s in shutdowns %}
+        <tr>
+          <td class="dim mono">{{ s.created_at[:19] }}</td>
+          <td class="r num">{{ s.details.open_count or 0 }}</td>
+          <td class="dim">{{ s.message }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="empty empty-hint">No shutdown events recorded.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

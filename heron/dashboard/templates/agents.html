@@ -1,0 +1,302 @@
+{% extends "base.html" %}
+{% block title %}Agents — HERON{% endblock %}
+{% block content %}
+
+<style>
+  .agent-state {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.35rem 0.7rem; border-radius: 999px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    font-size: 0.78rem; color: var(--muted);
+  }
+  .agent-state .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+  }
+  .agent-state.running .dot { background: var(--info); animation: pulse 1.5s infinite; }
+  .agent-state.done .dot { background: var(--ok); }
+  .agent-state.error .dot { background: var(--err); }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(1.4); }
+  }
+
+  .output-block {
+    background: #0d1423; border: 1px solid var(--border);
+    border-radius: 6px; padding: 0.75rem 0.9rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem; color: var(--text);
+    white-space: pre-wrap; word-break: break-word;
+    max-height: 280px; overflow-y: auto;
+    line-height: 1.5;
+  }
+  .output-label {
+    font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin-bottom: 0.3rem;
+    display: flex; align-items: center; gap: 0.4rem;
+  }
+  .output-label .src-local { color: var(--brand); }
+  .output-label .src-api { color: #c084fc; }
+  details.audit-entry { border-bottom: 1px solid var(--border); padding: 0.8rem 0; }
+  details.audit-entry:last-child { border-bottom: 0; }
+  details.audit-entry summary {
+    cursor: pointer; list-style: none; display: flex; align-items: center;
+    gap: 0.6rem; flex-wrap: wrap;
+  }
+  details.audit-entry summary::-webkit-details-marker { display: none; }
+  details.audit-entry summary::before {
+    content: "▸"; color: var(--muted); transition: transform 0.15s;
+    display: inline-block;
+  }
+  details.audit-entry[open] summary::before { transform: rotate(90deg); }
+  .audit-body { margin-top: 0.75rem; display: grid; gap: 0.75rem; }
+  @media (min-width: 900px) { .audit-body.split { grid-template-columns: 1fr 1fr; } }
+
+  .thesis-card {
+    padding: 0.9rem; border-left: 3px solid var(--info);
+    background: var(--panel); border-radius: 6px;
+    margin-bottom: 0.6rem;
+  }
+  .thesis-card h4 {
+    margin: 0 0 0.35rem 0; font-size: 0.88rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .thesis-card .thesis-text {
+    font-size: 0.83rem; color: var(--text); line-height: 1.5;
+  }
+
+  .run-form {
+    display: flex; gap: 0.6rem; align-items: flex-end; flex-wrap: wrap;
+  }
+  .run-form label {
+    display: flex; flex-direction: column; gap: 0.25rem;
+    font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .run-form select, .run-form input {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); padding: 0.45rem 0.6rem; border-radius: 6px;
+    font-size: 0.85rem; font-family: inherit; min-width: 10rem;
+  }
+  .run-form input { min-width: 6rem; }
+</style>
+
+<div class="page-head">
+  <div>
+    <h1>Research Agents</h1>
+    <p class="lede">{{ mode_label }} mode · local (Ollama/Qwen) + cloud (Claude) activity, outputs, and theses.</p>
+  </div>
+  <div>
+    {% if research_state.running %}
+      <span class="agent-state running" id="agent-state">
+        <span class="dot"></span>
+        <span>Research running · started {{ research_state.started_at[11:19] if research_state.started_at else '' }}</span>
+      </span>
+    {% elif research_state.error %}
+      <span class="agent-state error" id="agent-state">
+        <span class="dot"></span>
+        <span>Last run failed</span>
+      </span>
+    {% elif research_state.result %}
+      <span class="agent-state done" id="agent-state">
+        <span class="dot"></span>
+        <span>Idle · last finished {{ research_state.finished_at[11:19] if research_state.finished_at else '' }}</span>
+      </span>
+    {% else %}
+      <span class="agent-state" id="agent-state">
+        <span class="dot"></span>
+        <span>Idle · no run this session</span>
+      </span>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Run research form -->
+<div class="card p-4 mb-5" style="border-left: 3px solid var(--brand);">
+  <div class="section-title">Run research pass</div>
+  <form action="/research/run" method="post" class="run-form">
+    <label>Strategy
+      <select name="strategy_id">
+        {% for s in strategies %}
+        {% if s.state in ('PAPER','LIVE','PROPOSED') %}
+        <option value="{{ s.id }}">{{ s.id }} <span>({{ s.state }})</span></option>
+        {% endif %}
+        {% endfor %}
+      </select>
+    </label>
+    <label>Pass
+      <select name="pass_type">
+        <option value="midday" selected>midday (6h lookback)</option>
+        <option value="premarket">premarket (16h lookback)</option>
+        <option value="eod">eod (24h lookback)</option>
+      </select>
+    </label>
+    <label>Lookback (h)
+      <input type="number" name="lookback_hours" value="6" min="1" max="72">
+    </label>
+    <button type="submit" class="btn btn-ok" {% if research_state.running %}disabled{% endif %}>
+      {% if research_state.running %}Running…{% else %}▶ Run now{% endif %}
+    </button>
+  </form>
+
+  {% if research_state.result %}
+    {% set r = research_state.result %}
+    <div class="mt-4 p-3" style="background: var(--panel-2); border-radius: 6px; font-size: 0.83rem;">
+      <div class="text-xs uppercase" style="color: var(--muted); letter-spacing: 0.06em;">Last result</div>
+      <div class="mt-1">
+        <span class="pill pill-{{ 'ok' if r.status == 'ok' else 'warn' }}">{{ r.status }}</span>
+        {% if r.articles is defined %}
+        <span class="ml-2 mono" style="color: var(--muted);">
+          {{ r.articles }} articles · {{ r.relevant or 0 }} relevant · {{ r.candidates or 0 }} candidates
+        </span>
+        {% endif %}
+        {% if r.reason %}<span class="ml-2" style="color: var(--warn);">{{ r.reason }}</span>{% endif %}
+      </div>
+      {% if r.escalation %}
+      <div class="mt-2 mono" style="color: var(--muted); font-size: 0.78rem;">
+        Escalation: {{ r.escalation.escalated or 0 }} theses, {{ r.escalation.sampled or 0 }} audits
+      </div>
+      {% endif %}
+    </div>
+  {% elif research_state.error %}
+    <div class="mt-4 p-3" style="background: rgba(239,68,68,0.1); border: 1px solid var(--err); border-radius: 6px; font-size: 0.83rem; color: var(--err);">
+      <div class="text-xs uppercase" style="letter-spacing: 0.06em;">Last error</div>
+      <div class="mt-1 mono">{{ research_state.error }}</div>
+    </div>
+  {% endif %}
+</div>
+
+<!-- ============================================================ -->
+<!-- Two-column: Activity + Today's cost split -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-5">
+  <div class="card p-4 lg:col-span-2">
+    <div class="section-title">Activity feed</div>
+    {% if events %}
+    <div style="max-height: 400px; overflow-y: auto;">
+    <table class="htable">
+      <thead>
+        <tr><th style="width: 140px;">Time</th><th style="width: 160px;">Type</th><th>Message</th></tr>
+      </thead>
+      <tbody>
+      {% for e in events %}
+        <tr>
+          <td class="dim mono" style="font-size: 0.74rem;">{{ e.created_at[5:19] }}</td>
+          <td><span class="pill pill-{% if e.severity == 'error' %}err{% elif e.severity == 'warn' %}warn{% else %}info{% endif %}">{{ e.event_type }}</span></td>
+          <td style="font-size: 0.82rem;">{{ e.message }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty"><div class="empty-title">No research activity yet</div>
+      <div class="empty-hint">Run a pass above or via <code>heron research run</code>.</div></div>
+    {% endif %}
+  </div>
+
+  <div class="card p-4">
+    <div class="section-title">Today's LLM usage</div>
+    {% if today_costs %}
+    <table class="htable">
+      <thead><tr><th>Model</th><th class="r">Tokens</th><th class="r">Cost</th></tr></thead>
+      <tbody>
+      {% for row in today_costs %}
+        <tr>
+          <td class="mono" style="font-size: 0.78rem;">{{ row.model }}</td>
+          <td class="r num">{{ "{:,}".format((row.tokens_in or 0) + (row.tokens_out or 0)) }}</td>
+          <td class="r num">${{ "%.4f"|format(row.cost or 0) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty empty-hint" style="font-size: 0.82rem;">No LLM calls today.</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- Latest LLM outputs (audits) -->
+<div class="card p-4 mb-5">
+  <div class="section-title">Latest LLM outputs (audits)</div>
+  {% if audits %}
+    {% for a in audits %}
+    <details class="audit-entry">
+      <summary>
+        <span class="pill pill-{% if a.divergence %}warn{% else %}ok{% endif %}">{{ a.audit_type }}</span>
+        {% if a.divergence %}<span class="pill pill-err">divergence</span>{% endif %}
+        {% if a.strategy_id %}<span class="mono" style="color: var(--muted); font-size: 0.78rem;">{{ a.strategy_id }}</span>{% endif %}
+        {% if a.candidate_id %}<a class="link mono" style="font-size: 0.78rem;" href="/candidate/{{ a.candidate_id }}">#{{ a.candidate_id }}</a>{% endif %}
+        <span class="mono dim" style="font-size: 0.74rem; margin-left: auto;">{{ a.created_at[5:19] }}</span>
+      </summary>
+      <div class="audit-body {% if a.local_output and a.api_output %}split{% endif %}">
+        {% if a.local_output %}
+        <div>
+          <div class="output-label"><span class="src-local">● LOCAL (Qwen/Ollama)</span></div>
+          <div class="output-block">{{ a.local_output }}</div>
+        </div>
+        {% endif %}
+        {% if a.api_output %}
+        <div>
+          <div class="output-label"><span class="src-api">● API (Claude)</span></div>
+          <div class="output-block">{{ a.api_output }}</div>
+        </div>
+        {% endif %}
+        {% if a.notes %}
+        <div style="grid-column: 1 / -1; font-size: 0.82rem; color: var(--muted);">
+          <strong style="color: var(--text);">Notes:</strong> {{ a.notes }}
+        </div>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  {% else %}
+  <div class="empty"><div class="empty-title">No audits yet</div>
+    <div class="empty-hint">Audits are captured when research escalates to the API for comparison with local output.</div></div>
+  {% endif %}
+</div>
+
+<!-- ============================================================ -->
+<!-- Recent candidate theses -->
+<div class="card p-4">
+  <div class="section-title">Recent candidate theses</div>
+  {% if recent_candidates %}
+    {% for c in recent_candidates %}
+    <div class="thesis-card">
+      <h4>
+        <span class="mono" style="font-weight: 700;">{{ c.ticker }}</span>
+        <span class="pill pill-{% if c.disposition == 'accepted' %}ok{% elif c.disposition == 'rejected' %}err{% else %}warn{% endif %}">{{ c.disposition }}</span>
+        <a class="link" style="font-size: 0.78rem;" href="/candidate/{{ c.id }}">#{{ c.id }} →</a>
+        <span class="mono dim" style="font-size: 0.72rem; margin-left: auto;">{{ c.created_at[5:19] }}</span>
+      </h4>
+      <div class="thesis-text">{{ c.thesis }}</div>
+    </div>
+    {% endfor %}
+  {% else %}
+  <div class="empty"><div class="empty-title">No candidate theses yet</div>
+    <div class="empty-hint">Theses are generated by the LLM when candidates are escalated for deeper review.</div></div>
+  {% endif %}
+</div>
+
+<!-- Auto-refresh while research is running -->
+{% if research_state.running %}
+<script>
+  // Poll status endpoint; reload once the run finishes so results appear.
+  let pollCount = 0;
+  const statusPoll = setInterval(async () => {
+    pollCount++;
+    try {
+      const r = await fetch('/agents/status');
+      const s = await r.json();
+      if (!s.running) {
+        clearInterval(statusPoll);
+        window.location.reload();
+      }
+    } catch (e) { /* ignore */ }
+    if (pollCount > 300) clearInterval(statusPoll);  // safety cap at ~5min
+  }, 1000);
+</script>
+{% endif %}
+
+{% endblock %}

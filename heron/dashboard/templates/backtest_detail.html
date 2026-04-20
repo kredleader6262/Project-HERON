@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <a href="/backtests" class="link text-sm">← All reports</a>
+  <h1 class="text-2xl font-bold">Backtest #{{ report.id }}</h1>
+  <span class="pill pill-brand mono">{{ report.strategy_id }}</span>
+</div>
+
+{% if report.contaminated %}
+<div class="card p-4 mb-5" style="border-left: 3px solid var(--warn);">
+  <div class="section-title" style="color: #fbbf24;">⚠ Memorization contamination</div>
+  <div class="text-sm">{{ report.contamination_notes }}</div>
+</div>
+{% endif %}
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="card stat">
+    <div class="stat-label">Window</div>
+    <div class="text-sm num" style="margin-top: 0.35rem;">{{ report.start_date }} → {{ report.end_date }}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Trades</div>
+    <div class="stat-value num">{{ metrics.n_trades }}</div>
+    <div class="stat-sub">{{ metrics.n_wins }}W / {{ metrics.n_losses }}L · {{ "%.0f"|format(metrics.win_rate * 100) }}%</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Total Return</div>
+    <div class="stat-value num {% if metrics.total_return >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+      {{ "%+.2f"|format(metrics.total_return * 100) }}%
+    </div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Sharpe / Max DD</div>
+    <div class="stat-value num">
+      {% if metrics.sharpe is not none %}{{ "%.2f"|format(metrics.sharpe) }}{% else %}—{% endif %}
+    </div>
+    <div class="stat-sub">DD {{ "%.2f"|format(metrics.max_drawdown * 100) }}%</div>
+  </div>
+</div>
+
+<div class="section-title">Trades ({{ trades|length }})</div>
+<div class="card overflow-hidden mb-6">
+  {% if trades %}
+  <table class="htable">
+    <thead><tr><th>Ticker</th><th>Entry</th><th>Exit</th><th class="r">Entry $</th><th class="r">Exit $</th><th class="r">Qty</th><th class="r">P&amp;L</th><th class="r">%</th><th>Reason</th><th class="r">Days</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td class="mono font-semibold">{{ t.ticker }}</td>
+        <td class="dim mono">{{ t.entry_date }}</td>
+        <td class="dim mono">{{ t.exit_date }}</td>
+        <td class="r num">${{ "%.2f"|format(t.entry) }}</td>
+        <td class="r num">${{ "%.2f"|format(t.exit) }}</td>
+        <td class="r num">{{ t.qty }}</td>
+        <td class="r num {% if t.net_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">${{ "%+.2f"|format(t.net_pnl) }}</td>
+        <td class="r num {% if t.pnl_pct >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ "%+.2f"|format(t.pnl_pct * 100) }}%</td>
+        <td class="dim">{{ t.reason }}</td>
+        <td class="r num">{{ t.days_held }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No trades executed in this backtest window.</div>{% endif %}
+</div>
+
+<details class="card p-4">
+  <summary class="cursor-pointer font-semibold text-sm" style="color: var(--muted);">Parameters <span class="mono">(seed={{ report.seed }})</span></summary>
+  <pre class="text-xs mono mt-3 p-3 rounded overflow-x-auto" style="background: #0d1423; border: 1px solid var(--border); color: var(--muted);">{{ params | tojson(indent=2) }}</pre>
+</details>
+{% endblock %}

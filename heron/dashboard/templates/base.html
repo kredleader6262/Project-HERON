@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en" data-mode="{{ mode }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if mode == 'live' %}[LIVE] {% endif %}{% block title %}HERON{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%23{{ mode_accent[1:] }}'/></svg>">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    /* ─────────────────────────────────────────────────────────
+       DESIGN TOKENS
+       ───────────────────────────────────────────────────────── */
+    :root {
+      /* Mode-aware accent — one color does the work of a dozen pills. */
+      --accent:        {{ mode_accent }};
+      --accent-weak:   {{ mode_accent }}22;
+      --accent-line:   {{ mode_accent }}55;
+
+      /* Neutral palette — deeper, quieter than before. */
+      --bg:       #0a0e14;
+      --surface:  #0e1420;
+      --surface-2:#121a28;
+      --line:     #1b2433;
+      --line-2:   #2a3447;
+
+      --fg:       #e2e8f3;
+      --fg-muted: #98a2b7;
+      --fg-dim:   #5b6883;
+
+      /* Semantic (used sparingly, for real meaning only) */
+      --ok:       #3ddc97;
+      --warn:     #ffb547;
+      --err:      #ff6b6b;
+      --info:     #5eaaff;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       TYPOGRAPHY / BASE
+       ───────────────────────────────────────────────────────── */
+    html, body {
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+      font-weight: 400;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      font-feature-settings: "ss01", "cv11";
+    }
+    body { min-height: 100vh; }
+
+    h1 { font-size: 1.4rem; font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; margin: 0; }
+    h2 { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+    h3 { font-size: 0.9rem; font-weight: 600; letter-spacing: 0; margin: 0; }
+
+    .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    .num  { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+
+    .dim  { color: var(--fg-dim); }
+    .muted { color: var(--fg-muted); }
+
+    /* Micro-label — used for every stat caption, section header, table col-head */
+    .micro {
+      font-size: 0.68rem;
+      font-weight: 500;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--fg-muted);
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       LAYOUT
+       ───────────────────────────────────────────────────────── */
+    .shell {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    .page { padding: 1.8rem 0 4rem; }
+
+    .page-head {
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem;
+      margin-bottom: 1.6rem;
+    }
+    .page-head .lede {
+      margin-top: 0.25rem; color: var(--fg-muted); font-size: 0.82rem;
+    }
+
+    .section-title {
+      font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--fg-muted);
+      margin-bottom: 0.75rem;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       TOP RAIL (brand + nav)
+       ───────────────────────────────────────────────────────── */
+    .rail-top {
+      background: var(--bg);
+      border-bottom: 1px solid var(--line);
+    }
+    .rail-top .inner {
+      display: flex; align-items: center; gap: 1.5rem; padding: 0.75rem 2rem;
+      max-width: 1280px; margin: 0 auto;
+    }
+
+    .wordmark {
+      font-weight: 700; letter-spacing: 0.02em; font-size: 0.95rem;
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      color: var(--fg);
+    }
+    .wordmark::before {
+      content: ""; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px var(--accent-line);
+    }
+
+    .nav {
+      display: flex; align-items: center; gap: 0.1rem; flex-wrap: wrap;
+      flex: 1;
+    }
+    .nav a {
+      color: var(--fg-muted);
+      padding: 0.4rem 0.75rem;
+      border-radius: 6px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      transition: color 0.12s, background 0.12s;
+    }
+    .nav a:hover { color: var(--fg); background: var(--surface); }
+    .nav a.active {
+      color: var(--fg);
+      background: transparent;
+      position: relative;
+    }
+    .nav a.active::after {
+      content: "";
+      position: absolute; left: 0.75rem; right: 0.75rem; bottom: -0.8rem;
+      height: 2px; background: var(--accent); border-radius: 2px;
+    }
+    .nav a .count {
+      background: var(--accent-weak);
+      color: var(--accent);
+      border: 1px solid var(--accent-line);
+      font-size: 0.65rem; font-weight: 600;
+      padding: 0 0.4rem; border-radius: 999px; min-width: 1.15rem;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       STATUS RAIL — mode toggle + system status, single line
+       ───────────────────────────────────────────────────────── */
+    .rail-status {
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      font-size: 0.75rem;
+      color: var(--fg-muted);
+    }
+    .rail-status .inner {
+      display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap;
+      padding: 0.55rem 2rem; max-width: 1280px; margin: 0 auto;
+    }
+
+    /* Mode segmented control — the star of the show */
+    .mode-seg {
+      display: inline-flex; background: var(--bg); border: 1px solid var(--line);
+      border-radius: 7px; padding: 2px; gap: 2px;
+    }
+    .mode-seg form { display: inline-flex; }
+    .mode-seg button {
+      background: transparent; border: none; color: var(--fg-muted);
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.05em;
+      text-transform: uppercase;
+      padding: 0.3rem 0.8rem; border-radius: 5px;
+      cursor: pointer; transition: all 0.15s;
+      font-family: inherit;
+    }
+    .mode-seg button:hover { color: var(--fg); }
+    .mode-seg button.active {
+      background: var(--accent-weak);
+      color: var(--accent);
+      box-shadow: inset 0 0 0 1px var(--accent-line);
+    }
+
+    .rail-sep {
+      width: 1px; height: 14px; background: var(--line-2);
+    }
+
+    .sys-dot {
+      width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+      vertical-align: middle; margin-right: 0.5rem;
+    }
+    .sys-ok   { background: var(--ok); }
+    .sys-warn { background: var(--warn); }
+    .sys-halt { background: var(--err); animation: pulse 1.2s infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.35; }
+    }
+
+    .kv { display: inline-flex; align-items: baseline; gap: 0.45rem; }
+    .kv .k { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.1em; color: var(--fg-dim); font-weight: 600; }
+    .kv .v { color: var(--fg); font-weight: 500; }
+
+    .queue-pill {
+      background: var(--accent-weak); color: var(--accent);
+      border: 1px solid var(--accent-line);
+      padding: 0.1rem 0.5rem; border-radius: 999px;
+      font-size: 0.68rem; font-weight: 600;
+    }
+
+    #clock { font-family: 'JetBrains Mono', monospace; color: var(--fg-dim); }
+
+    /* ─────────────────────────────────────────────────────────
+       MODE-AWARE ACCENT LINE — the visual thesis of the app
+       A hairline under the status rail reflects the current mode.
+       ───────────────────────────────────────────────────────── */
+    .mode-line {
+      height: 1px; background: var(--accent); opacity: 0.6;
+    }
+    html[data-mode="live"] .mode-line { opacity: 1; height: 2px; }
+    html[data-mode="all"] .mode-line { opacity: 0.15; }
+
+    /* In live mode, a subtle red vignette at page edges */
+    html[data-mode="live"] body::before {
+      content: ""; position: fixed; inset: 0;
+      box-shadow: inset 0 0 80px rgba(255, 107, 107, 0.06);
+      pointer-events: none; z-index: 1000;
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       CARDS / SURFACES
+       ───────────────────────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .card-flat {
+      background: transparent;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .card-accent {
+      border-left: 2px solid var(--accent);
+    }
+
+    /* ─────────────────────────────────────────────────────────
+       STAT TILE — hero number + micro label
+       ───────────────────────────────────────────────────────── */
+    .stat { padding: 1.1rem 1.2rem; }
+    .stat-label {
+      font-size: 0.66rem; font-weight: 600; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--fg-muted);
+    }
+    .stat-value {
+      font-size: 1.75rem; font-weight: 600; line-height: 1.1;
+      letter-spacing: -0.02em; margin-top: 0.35rem;
+      font-variant-numeric: tabular-nums;
+    }
+    .stat-sub {
+      font-size: 0.72rem; color: var(--fg-muted); margin-top: 0.3rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Stat row — several stats in a borderless strip */
+    .stat-row {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+      overflow: hidden;
+    }
+    .stat-row .stat { border-right: 1px solid var(--line); }
+    .stat-row .stat:last-child { border-right: none; }
+
+    /* ─────────────────────────────────────────────────────────
+       TABLES — dense, hairline, no alternating rows
+       ───────────────────────────────────────────────────────── */
+    .htable {
+      width: 100%; border-collapse: separate; border-spacing: 0;
+      font-size: 0.82rem;
+    }
+    .htable thead th {
+      background: transparent;
+      color: var(--fg-muted);
+      font-weight: 600; font-size: 0.66rem;
+      letter-spacing: 0.1em; text-transform: uppercase;
+      text-align: left; padding: 0.6rem 1rem;
+      border-bottom: 1px solid var(--line);
+      position: sticky; top: 0; z-index: 1;
+      background: var(--surface);
+    }
+    .htable tbody td {
+      padding: 0.65rem 1rem;
+      border-bottom: 1px solid var(--line);
+      color: var(--fg);
+      vertical-align: middle;
+    }
+    .htable tbody tr:last-child td { border-bottom: none; }
+    .htable tbody tr { transition: background 0.08s; }
+    .htable tbody tr:hover { background: var(--surface-2); }
+    .htable .r { text-align: right; }
+    .htable .num { font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+    .htable .dim { color: var(--fg-dim); font-size: 0.75rem; }
+
+    /* ─────────────────────────────────────────────────────────
+       CHIPS — monochrome, dot-prefixed. Replaces the rainbow pills.
+       ───────────────────────────────────────────────────────── */
+    .chip {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.1rem 0.55rem 0.1rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.7rem; font-weight: 600;
+      letter-spacing: 0.03em;
+      background: var(--surface-2);
+      color: var(--fg);
+      border: 1px solid var(--line);
+      text-transform: lowercase;
+    }
+    .chip::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--fg-dim);
+    }
+    .chip-up::before    { background: var(--ok); }
+    .chip-down::before  { background: var(--err); }
+    .chip-warn::before  { background: var(--warn); }
+    .chip-info::before  { background: var(--info); }
+    .chip-accent::before{ background: var(--accent); }
+
+    /* Pills kept for legacy templates (audits, proposals, glossary use s-STATE) */
+    .pill { display: inline-flex; align-items: center; padding: 0.1rem 0.55rem;
+            border-radius: 4px; font-size: 0.68rem; font-weight: 600;
+            letter-spacing: 0.04em; text-transform: uppercase;
+            background: var(--surface-2); color: var(--fg);
+            border: 1px solid var(--line); }
+    .pill-ok    { color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 30%, var(--line)); }
+    .pill-warn  { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 30%, var(--line)); }
+    .pill-err   { color: var(--err);  border-color: color-mix(in srgb, var(--err) 30%, var(--line)); }
+    .pill-info  { color: var(--info); border-color: color-mix(in srgb, var(--info) 30%, var(--line)); }
+    .pill-brand { color: var(--accent); border-color: var(--accent-line); background: var(--accent-weak); }
+    .pill-muted { color: var(--fg-muted); }
+
+    /* Strategy-state pills — semantic override */
+    .s-LIVE     { color: var(--err);    border-color: color-mix(in srgb, var(--err) 40%, var(--line)); }
+    .s-PAPER    { color: var(--info);   border-color: color-mix(in srgb, var(--info) 40%, var(--line)); }
+    .s-PROPOSED { color: var(--warn);   border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+    .s-RETIRED  { color: var(--fg-dim); }
+    .s-ACCEPTED { color: var(--ok);     border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+    .s-REJECTED { color: var(--err);    border-color: color-mix(in srgb, var(--err) 40%, var(--line)); }
+    .s-PENDING  { color: var(--warn);   border-color: color-mix(in srgb, var(--warn) 40%, var(--line)); }
+
+    /* PnL */
+    .pnl-pos { color: var(--ok); }
+    .pnl-neg { color: var(--err); }
+
+    /* ─────────────────────────────────────────────────────────
+       BUTTONS
+       ───────────────────────────────────────────────────────── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      padding: 0.42rem 0.9rem;
+      border-radius: 6px;
+      font-size: 0.78rem; font-weight: 600; letter-spacing: 0.01em;
+      border: 1px solid var(--line);
+      background: var(--surface-2);
+      color: var(--fg);
+      cursor: pointer;
+      transition: background 0.12s, border-color 0.12s;
+      font-family: inherit;
+    }
+    .btn:hover { background: var(--surface); border-color: var(--line-2); }
+    .btn-primary {
+      background: var(--accent-weak); color: var(--accent);
+      border-color: var(--accent-line);
+    }
+    .btn-primary:hover { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-ok { background: rgba(61,220,151,0.1); color: var(--ok);
+              border-color: color-mix(in srgb, var(--ok) 30%, var(--line)); }
+    .btn-ok:hover { background: var(--ok); color: #0a0e14; border-color: var(--ok); }
+    .btn-danger { background: rgba(255,107,107,0.1); color: var(--err);
+                  border-color: color-mix(in srgb, var(--err) 30%, var(--line)); }
+    .btn-danger:hover { background: var(--err); color: #0a0e14; border-color: var(--err); }
+    .btn-ghost { background: transparent; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ─────────────────────────────────────────────────────────
+       EMPTY STATE / MISC
+       ───────────────────────────────────────────────────────── */
+    .empty { padding: 3rem 1.5rem; text-align: center; color: var(--fg-muted); }
+    .empty-title { font-weight: 600; color: var(--fg); font-size: 0.95rem; margin-bottom: 0.35rem; }
+    .empty-hint { font-size: 0.82rem; color: var(--fg-dim); max-width: 32rem; margin: 0 auto; }
+
+    .filter-pill {
+      padding: 0.3rem 0.75rem; border-radius: 6px; font-size: 0.75rem;
+      font-weight: 500; color: var(--fg-muted);
+      border: 1px solid var(--line); background: transparent;
+    }
+    .filter-pill:hover { color: var(--fg); border-color: var(--line-2); }
+    .filter-pill.active {
+      color: var(--accent); background: var(--accent-weak);
+      border-color: var(--accent-line);
+    }
+
+    a.link { color: var(--accent); }
+    a.link:hover { color: var(--fg); }
+
+    /* Ring gauge */
+    .ring {
+      --pct: 0; --color: var(--ok);
+      width: 72px; height: 72px; border-radius: 50%;
+      background: conic-gradient(var(--color) calc(var(--pct)*1%), var(--surface-2) 0);
+      display: flex; align-items: center; justify-content: center; position: relative;
+    }
+    .ring::after {
+      content: ""; position: absolute; width: 56px; height: 56px;
+      border-radius: 50%; background: var(--surface);
+    }
+    .ring > span { position: relative; z-index: 1; font-weight: 700; font-size: 0.95rem; font-variant-numeric: tabular-nums; }
+
+    /* Progress bars */
+    .bar { width: 100%; height: 4px; background: var(--line); border-radius: 999px; overflow: hidden; }
+    .bar > div { height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.3s; }
+    .bar-warn > div { background: var(--warn); }
+    .bar-err > div { background: var(--err); }
+
+    code {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      background: var(--surface-2); color: var(--fg);
+      padding: 0.1rem 0.35rem; border-radius: 3px; font-size: 0.82em;
+      border: 1px solid var(--line);
+    }
+
+    /* Flash messages */
+    .flash {
+      padding: 0.7rem 1rem; margin-bottom: 1rem;
+      border-radius: 6px; font-size: 0.83rem;
+      background: var(--surface); border: 1px solid var(--line);
+      border-left: 3px solid var(--accent);
+    }
+    .flash.flash-success { border-left-color: var(--ok); }
+    .flash.flash-error   { border-left-color: var(--err); }
+    .flash.flash-warning { border-left-color: var(--warn); }
+  </style>
+</head>
+<body>
+  {% set sb = status_bar %}
+
+  {# ── Top rail: wordmark + flat nav ───────────────────────── #}
+  <div class="rail-top">
+    <div class="inner">
+      <a href="/" class="wordmark">HERON</a>
+      <nav class="nav">
+        <a href="/"           class="{% if active_path == '/' %}active{% endif %}">Overview</a>
+        <a href="/strategies" class="{% if active_path.startswith('/strateg') %}active{% endif %}">Strategies</a>
+        <a href="/proposals"  class="{% if active_path == '/proposals' %}active{% endif %}">
+          Inbox{% if sb.pending_strategies %}<span class="count">{{ sb.pending_strategies }}</span>{% endif %}
+        </a>
+        <a href="/trades"     class="{% if active_path == '/trades' %}active{% endif %}">Trades</a>
+        <a href="/candidates" class="{% if active_path == '/candidates' %}active{% endif %}">
+          Candidates{% if sb.pending_candidates %}<span class="count">{{ sb.pending_candidates }}</span>{% endif %}
+        </a>
+        <a href="/agents"     class="{% if active_path == '/agents' %}active{% endif %}">Agents</a>
+        <a href="/audits"     class="{% if active_path == '/audits' %}active{% endif %}">Audits</a>
+        <a href="/backtests"  class="{% if active_path.startswith('/backtests') %}active{% endif %}">Backtests</a>
+        <a href="/costs"      class="{% if active_path == '/costs' %}active{% endif %}">Costs</a>
+        <a href="/resilience" class="{% if active_path == '/resilience' %}active{% endif %}">Resilience</a>
+        <a href="/health"     class="{% if active_path == '/health' %}active{% endif %}">Health</a>
+        <a href="/glossary"   class="{% if active_path == '/glossary' %}active{% endif %}">Glossary</a>
+      </nav>
+    </div>
+  </div>
+
+  {# ── Status rail: mode + system + clock ─────────────────── #}
+  <div class="rail-status">
+    <div class="inner">
+      {# Mode segmented control #}
+      <div class="mode-seg" role="tablist" aria-label="View mode">
+        {% for m in modes %}
+        <form action="/mode/{{ m }}?next={{ active_path }}" method="post">
+          <button type="submit"
+                  class="{% if mode == m %}active{% endif %}"
+                  title="Switch to {{ m }} mode">{{ m }}</button>
+        </form>
+        {% endfor %}
+      </div>
+
+      <span class="rail-sep"></span>
+
+      <span>
+        <span class="sys-dot sys-{{ 'ok' if sb.system == 'ok' else ('warn' if sb.system == 'warn' else 'halt') }}"></span>
+        <span style="color: var(--fg); font-weight: 500;">
+          {{ {'ok': 'OK', 'warn': 'Attention', 'halt': 'Halt'}.get(sb.system, sb.system) }}
+        </span>
+      </span>
+
+      <span class="kv">
+        <span class="k">Session</span>
+        <span class="v">{% if sb.session == 'open' %}Regular
+          {%- elif sb.session == 'pre' %}Pre-market
+          {%- elif sb.session == 'after' %}After-hours
+          {%- else %}Closed{% endif %}</span>
+      </span>
+
+      <span class="kv">
+        <span class="k">Budget</span>
+        <span class="v num">${{ "%.2f"|format(sb.mtd) }}<span class="dim"> / ${{ "%.0f"|format(sb.ceiling) }}</span></span>
+        <span class="num" style="color: {% if sb.cost_state == 'ok' %}var(--fg-muted){% elif sb.cost_state == 'warn' %}var(--warn){% else %}var(--err){% endif %};">
+          {{ (sb.pct*100)|round(0)|int }}%
+        </span>
+      </span>
+
+      {% if sb.pending_strategies or sb.pending_candidates %}
+      <span class="kv">
+        <span class="k">Queue</span>
+        {% if sb.pending_strategies %}<a href="/proposals" class="queue-pill">{{ sb.pending_strategies }} strategy</a>{% endif %}
+        {% if sb.pending_candidates %}<a href="/candidates?disposition=pending" class="queue-pill">{{ sb.pending_candidates }} candidate</a>{% endif %}
+      </span>
+      {% endif %}
+
+      <span style="margin-left: auto;" class="mono" id="clock"></span>
+    </div>
+  </div>
+
+  <div class="mode-line"></div>
+
+  <main class="shell page">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+        <div class="flash flash-{{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    {% block content %}{% endblock %}
+  </main>
+
+  <script>
+    (function(){
+      const el = document.getElementById('clock');
+      function tick() {
+        const d = new Date();
+        const pad = n => String(n).padStart(2,'0');
+        el.textContent = `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}Z`;
+      }
+      tick(); setInterval(tick, 1000);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Audits — HERON{% endblock %}
+{% block content %}
+<div class="flex items-end justify-between mb-5">
+  <div>
+    <h1 class="text-2xl font-bold">LLM Audits</h1>
+    <p class="text-sm" style="color: var(--muted);">Trust score is rolling divergence between Claude and actual outcome.</p>
+  </div>
+</div>
+
+<div class="card p-5 mb-6">
+  <div class="section-title">Trust score · {{ score.window_days }}d rolling</div>
+  {% if score.trust_score is none %}
+    <div class="flex items-center gap-5">
+      <div class="ring" style="--pct: 0; --color: var(--muted-2);"><span class="dim">—</span></div>
+      <div>
+        <div class="text-sm" style="color: var(--muted);">Not enough samples yet.</div>
+        <div class="text-xs mt-1" style="color: var(--muted-2);">{{ score.warning }}</div>
+      </div>
+    </div>
+  {% else %}
+    {% set s = score.trust_score %}
+    {% set color = 'var(--ok)' if s >= 0.85 else ('var(--warn)' if s >= 0.70 else 'var(--err)') %}
+    <div class="flex items-center gap-5">
+      <div class="ring" style="--pct: {{ (s*100)|round(0)|int }}; --color: {{ color }};">
+        <span class="num">{{ "%.0f"|format(s * 100) }}%</span>
+      </div>
+      <div>
+        <div class="text-sm" style="color: var(--text);">
+          {{ score.sample_size }} samples · {{ score.divergent }} divergent
+        </div>
+        <div class="text-xs mt-1" style="color: var(--muted-2);">
+          {% if s >= 0.85 %}Healthy alignment.{% elif s >= 0.70 %}Watch for drift.{% else %}Divergence above threshold.{% endif %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if score.breakdown %}
+  <table class="htable mt-5" style="max-width: 28rem;">
+    <thead><tr><th>Type</th><th class="r">Total</th><th class="r">Divergent</th></tr></thead>
+    <tbody>
+    {% for k, v in score.breakdown.items() %}
+      <tr>
+        <td class="mono">{{ k }}</td>
+        <td class="r num">{{ v.n }}</td>
+        <td class="r num {% if v.divergent > 0 %}pnl-neg{% endif %}">{{ v.divergent }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card overflow-hidden">
+  <div class="px-4 py-3" style="border-bottom: 1px solid var(--border);">
+    <div class="section-title" style="margin: 0;">Recent audits</div>
+  </div>
+  {% if audits %}
+  <table class="htable">
+    <thead><tr><th>When</th><th>Type</th><th>Trade</th><th>Candidate</th><th>Notes</th><th class="r">Δ</th></tr></thead>
+    <tbody>
+    {% for a in audits %}
+      <tr>
+        <td class="dim mono">{{ a.created_at[:19] }}</td>
+        <td class="mono">{{ a.audit_type }}</td>
+        <td class="num">{{ a.trade_id or '—' }}</td>
+        <td class="num">{{ a.candidate_id or '—' }}</td>
+        <td class="dim">{{ (a.notes or '')[:100] }}</td>
+        <td class="r">{% if a.divergence %}<span style="color: #fbbf24;">⚠</span>{% else %}<span class="dim">·</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No audits yet</div>
+    <div class="empty-hint">Post-mortems run automatically after trades close. Also via <code>heron audit run</code>.</div></div>
+  {% endif %}
+</div>
+{% endblock %}

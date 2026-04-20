@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}HERON — Overview{% endblock %}
+{% block content %}
+
+{% set needs_attention = (wash_lots|length > 0) or (status_bar.pending_strategies > 0) or (status_bar.pending_candidates > 0) %}
+
+<div class="page-head">
+  <div>
+    <h1>Overview</h1>
+    <p class="lede">{{ mode_label }} view · operator console</p>
+  </div>
+  <div class="flex gap-2">
+    {% if status_bar.pending_strategies %}
+    <a href="/proposals" class="btn btn-primary">Review inbox →</a>
+    {% endif %}
+    <a href="/agents" class="btn">Agents</a>
+  </div>
+</div>
+
+{# ─── Attention strip ─── #}
+{% if needs_attention %}
+<div class="card card-accent p-4 mb-6" style="display: flex; align-items: center; gap: 2rem; flex-wrap: wrap;">
+  <div class="micro" style="color: var(--warn);">Needs attention</div>
+  {% if status_bar.pending_strategies > 0 %}
+  <a href="/proposals" class="link" style="font-size: 0.85rem;">
+    <span class="mono num" style="font-weight: 600; color: var(--warn);">{{ status_bar.pending_strategies }}</span>
+    strategy proposal{{ 's' if status_bar.pending_strategies != 1 else '' }}
+  </a>
+  {% endif %}
+  {% if status_bar.pending_candidates > 0 %}
+  <a href="/candidates?disposition=pending" class="link" style="font-size: 0.85rem;">
+    <span class="mono num" style="font-weight: 600; color: var(--warn);">{{ status_bar.pending_candidates }}</span>
+    trade candidate{{ 's' if status_bar.pending_candidates != 1 else '' }}
+  </a>
+  {% endif %}
+  {% if wash_lots %}
+  <a href="/health" class="link" style="font-size: 0.85rem;">
+    <span class="mono num" style="font-weight: 600; color: var(--err);">{{ wash_lots|length }}</span>
+    wash-sale lot{{ 's' if wash_lots|length != 1 else '' }} in 30d window
+  </a>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ─── Hero stat row — one panel, seamless columns ─── #}
+<div class="stat-row mb-6">
+  <div class="stat">
+    <div class="stat-label">Strategies</div>
+    <div class="stat-value num">{{ strategies|length }}</div>
+    <div class="stat-sub">
+      {% set live = strategies|selectattr('state','equalto','LIVE')|list|length %}
+      {% set paper = strategies|selectattr('state','equalto','PAPER')|list|length %}
+      {{ live }} live · {{ paper }} paper
+    </div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Open positions</div>
+    <div class="stat-value num">{{ open_trades|length }}</div>
+    <div class="stat-sub">{{ all_trades|length }} trades total</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">PDT day-trades</div>
+    {% if mode == 'paper' %}
+    <div class="stat-value num dim">—</div>
+    <div class="stat-sub">n/a in paper</div>
+    {% else %}
+    <div class="stat-value num {% if pdt_count >= 3 %}pnl-neg{% endif %}">{{ pdt_count }}<span class="dim" style="font-weight: 400;">/3</span></div>
+    <div class="stat-sub">{{ 'at limit — no day-trades today' if pdt_count >= 3 else ('1 remaining' if pdt_count == 2 else 'rolling 5d · live only') }}</div>
+    {% endif %}
+  </div>
+  <div class="stat">
+    <div class="stat-label">Month cost</div>
+    <div class="stat-value num">${{ "%.2f"|format(month_cost) }}</div>
+    <div class="stat-sub num">{{ (status_bar.pct * 100)|round(0)|int }}% of ${{ "%.0f"|format(status_bar.ceiling) }}</div>
+    <div class="bar {% if status_bar.cost_state == 'warn' %}bar-warn{% elif status_bar.cost_state == 'halt' %}bar-err{% endif %} mt-2">
+      <div style="width: {{ (status_bar.pct * 100)|round(1) }}%; min-width: {% if status_bar.pct > 0 %}3px{% else %}0{% endif %};"></div>
+    </div>
+  </div>
+</div>
+
+{# ─── Strategies + positions side by side ─── #}
+<div class="grid grid-cols-1 {% if open_trades %}lg:grid-cols-2{% endif %} gap-5 mb-6">
+  <div>
+    <div class="section-title">Active strategies</div>
+    <div class="card overflow-hidden">
+      {% if strategies %}
+      <table class="htable">
+        <thead><tr><th>ID</th><th>Name</th><th>State</th><th class="r">Cap</th></tr></thead>
+        <tbody>
+        {% for s in strategies %}
+          <tr>
+            <td><a class="link mono" href="/strategy/{{ s.id }}">{{ s.id }}</a></td>
+            <td>{{ s.name }}</td>
+            <td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td>
+            <td class="r num">{{ "%.0f"|format(s.max_capital_pct * 100) }}%</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty">
+        <div class="empty-title">No strategies in {{ mode_label }} mode</div>
+        <div class="empty-hint">Switch mode above, or run <code>heron baseline init</code> to seed one.</div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if open_trades %}
+  <div>
+    <div class="section-title">Open positions</div>
+    <div class="card overflow-hidden">
+      <table class="htable">
+        <thead><tr><th>Ticker</th><th>Strategy</th><th class="r">Qty</th><th class="r">Entry</th><th class="r">Stop</th><th class="r">Target</th></tr></thead>
+        <tbody>
+        {% for t in open_trades %}
+          <tr>
+            <td class="mono font-semibold">{{ t.ticker }}</td>
+            <td class="dim">{{ t.strategy_id }}</td>
+            <td class="r num">{{ t.qty }}</td>
+            <td class="r num">${{ "%.2f"|format(t.fill_price or 0) }}</td>
+            <td class="r num">${{ "%.2f"|format(t.stop_price or 0) }}</td>
+            <td class="r num">${{ "%.2f"|format(t.target_price or 0) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+{# ─── Recent events ─── #}
+<div class="section-title">Recent events</div>
+<div class="card overflow-hidden">
+  {% if events %}
+  <table class="htable">
+    <thead><tr><th>Time</th><th>Severity</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td class="dim mono">{{ e.created_at[5:19] }}</td>
+        <td>
+          <span class="chip {% if e.severity in ('error','critical') %}chip-down{% elif e.severity == 'warn' %}chip-warn{% else %}{% endif %}">{{ e.severity }}</span>
+        </td>
+        <td class="mono dim">{{ e.event_type }}</td>
+        <td>{{ e.message }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No events logged</div>
+    <div class="empty-hint">Events appear here as the system runs.</div></div>
+  {% endif %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,329 @@
+{% extends "base.html" %}
+{% block title %}Glossary — HERON{% endblock %}
+{% block content %}
+
+<style>
+  .gloss-toc { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.5rem; }
+  .gloss-toc a {
+    font-size: 0.75rem; padding: 0.3rem 0.65rem; border-radius: 999px;
+    background: var(--panel-2); color: var(--muted); border: 1px solid var(--border);
+    text-decoration: none;
+  }
+  .gloss-toc a:hover { color: var(--text); border-color: var(--brand); }
+  .gloss-section { margin-bottom: 2rem; }
+  .gloss-section h2 {
+    font-size: 1rem; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--muted); margin: 0 0 0.75rem 0; font-weight: 600;
+  }
+  .gloss-grid { display: grid; grid-template-columns: 1fr; gap: 0.75rem; }
+  @media (min-width: 900px) { .gloss-grid { grid-template-columns: 1fr 1fr; } }
+  .gloss-term {
+    padding: 0.9rem 1rem; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--border);
+  }
+  .gloss-term dt {
+    font-weight: 600; color: var(--text); margin-bottom: 0.25rem;
+    display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap;
+  }
+  .gloss-term dt .abbr { font-family: 'JetBrains Mono', monospace; color: var(--brand); font-size: 0.8rem; }
+  .gloss-term dd { color: var(--muted); font-size: 0.85rem; line-height: 1.45; margin: 0; }
+  .gloss-term dd code {
+    background: var(--panel-2); padding: 0.1rem 0.35rem; border-radius: 3px;
+    font-size: 0.78rem; color: var(--info);
+  }
+  .gloss-term.danger { border-left: 3px solid var(--err); }
+  .gloss-term.warn { border-left: 3px solid var(--warn); }
+  .gloss-term.info { border-left: 3px solid var(--info); }
+</style>
+
+<div class="mb-5">
+  <h1 class="text-2xl font-bold">Glossary</h1>
+  <p class="text-sm" style="color: var(--muted);">
+    Vocabulary for HERON — trading concepts, architecture terms, and safety invariants.
+    Red-bordered terms are safety-critical; warnings have orange borders.
+  </p>
+</div>
+
+<div class="gloss-toc">
+  <a href="#trading">Trading &amp; Regulatory</a>
+  <a href="#strategies">Strategies &amp; Signals</a>
+  <a href="#execution">Execution &amp; Orders</a>
+  <a href="#risk">Risk &amp; Safety</a>
+  <a href="#research">Research &amp; LLM</a>
+  <a href="#arch">Architecture</a>
+  <a href="#metrics">Metrics &amp; Backtesting</a>
+  <a href="#ops">Ops &amp; Status</a>
+</div>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="trading">
+  <h2>Trading &amp; Regulatory</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term danger">
+      <dt>Wash sale <span class="abbr">§1091</span></dt>
+      <dd>IRS rule: if you sell a security at a loss and buy it (or a "substantially identical" one) within 30 days before or after, the loss is disallowed and the basis of the replacement shares is adjusted. HERON pre-checks every order against recent losing closes and blocks trades that would trigger one.</dd>
+    </dl>
+    <dl class="gloss-term danger">
+      <dt>Pattern Day Trader <span class="abbr">PDT</span></dt>
+      <dd>FINRA rule: four or more day trades in a rolling 5-business-day window flags the account as a PDT, requiring $25k equity minimum. HERON tracks day-trade count and warns/blocks near the limit.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Day trade</dt>
+      <dd>Opening and closing the same position on the same trading day. Counts toward PDT.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Settlement <span class="abbr">T+1</span></dt>
+      <dd>Equity trades settle one business day after execution (as of May 2024). Cash is not available for another buy until settlement.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Good faith violation <span class="abbr">GFV</span></dt>
+      <dd>Selling a security bought with unsettled funds before those funds have settled. Three GFVs in 12 months = 90-day restriction.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Market session</dt>
+      <dd>Four phases shown in the status bar:
+        <code>pre</code> (04:00–09:30 ET),
+        <code>open</code> (09:30–16:00 ET, regular hours),
+        <code>after</code> (16:00–20:00 ET),
+        <code>closed</code> (overnight + weekends).</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="strategies">
+  <h2>Strategies &amp; Signals</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term">
+      <dt>PEAD <span class="abbr">Post-Earnings Announcement Drift</span></dt>
+      <dd>Documented anomaly: stocks that beat (miss) earnings tend to drift in that direction for weeks after the announcement, beyond the initial price jump. HERON's <code>pead_v1</code> strategy scans for earnings surprises + positive drift confirmation and holds for a minimum number of days.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Momentum breakout</dt>
+      <dd>Strategy family that enters on price breaking above a defined resistance level (e.g., N-day high) with volume confirmation. HERON's <code>momentum_breakout_v1</code> is the canonical implementation.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Baseline strategy</dt>
+      <dd>A locked-in control variant (named <code>*_baseline</code>) kept deliberately simple and unchanged. Used as a reference to detect whether the "improved" version is actually outperforming — if not, the baseline wins.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Candidate</dt>
+      <dd>A ticker surfaced by the research layer that <em>might</em> be worth trading under some strategy. Has a disposition: <code>pending</code>, <code>accepted</code>, or <code>rejected</code>. Accepting a candidate does not automatically create an order — it graduates it to the strategy's queue.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Thesis</dt>
+      <dd>Short natural-language rationale attached to each candidate. "<em>Why do we think this is a trade?</em>" Written by the LLM during research; stored in the journal for post-mortems.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Watchlist</dt>
+      <dd>The universe of tickers the system is allowed to look at. Defined in config. Candidates outside the watchlist are filtered out early.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="execution">
+  <h2>Execution &amp; Orders</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term info">
+      <dt>Idempotent order</dt>
+      <dd>An order that can be safely resubmitted without creating duplicates. HERON achieves this with a deterministic <code>client_order_id</code> = <code>{strategy}_{utc_ms}_{ticker}_{side}</code>. Before submitting, the executor queries whether that ID already exists.</dd>
+    </dl>
+    <dl class="gloss-term info">
+      <dt>client_order_id</dt>
+      <dd>A broker-accepted string the client generates to tag an order. Prevents duplicate fills if the network hiccups mid-submission. <strong>Never</strong> let the broker assign it silently.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Fill</dt>
+      <dd>The actual price and quantity at which an order executed. May differ from the order price (slippage). The <code>fill_price</code> is what HERON records in the journal as the trade entry.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Virtual stop</dt>
+      <dd>A stop-loss that HERON monitors locally and fires a market order when triggered, rather than resting with the broker. Reduces exposure to broker stop-hunting and enables custom logic (e.g., ATR-based trailing). Polled — not event-driven.</dd>
+    </dl>
+    <dl class="gloss-term warn">
+      <dt>Stale quote</dt>
+      <dd>A last-trade quote older than 10 seconds. HERON's kill switch refuses to submit orders on stale quotes — the market may have moved significantly and the sizing/stop math would be wrong.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Paper vs. live</dt>
+      <dd><code>paper</code> = Alpaca's simulated execution (no real money). <code>live</code> = real account. Strategy state must be explicitly promoted to <code>LIVE</code> before paper mode is dropped.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Reconciliation</dt>
+      <dd>Periodic sync between HERON's journal and the broker's actual positions/orders. If they disagree, something went wrong — the journal is updated and an event logged.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="risk">
+  <h2>Risk &amp; Safety</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term danger">
+      <dt>Kill switch</dt>
+      <dd>Any condition that halts new order submission: stale quotes, cost ceiling breach, broker connectivity loss, or manual operator halt.</dd>
+    </dl>
+    <dl class="gloss-term danger">
+      <dt>Operator-gated</dt>
+      <dd>No code path autonomously increases risk exposure. New strategies, size increases, and state promotions require explicit operator approval via the dashboard or CLI.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Position sizing</dt>
+      <dd>How many shares to buy, derived from: per-strategy <code>max_capital_pct</code>, account equity, entry price, stop distance, and a max-loss-per-trade cap.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Drawdown budget</dt>
+      <dd>Per-strategy limit on cumulative unrealized + realized loss before the strategy is auto-paused. Expressed as a percentage of allocated capital.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Max capital pct</dt>
+      <dd>The fraction of total account equity a strategy is allowed to commit at peak. Prevents any single strategy from dominating the book.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Min hold days</dt>
+      <dd>Minimum days a position must stay open before the strategy may close it on signal. Prevents whipsaw and short-term-gains tax treatment on some strategies.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="research">
+  <h2>Research &amp; LLM</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term danger">
+      <dt>LLM boundary</dt>
+      <dd>The LLM <strong>researches and recommends</strong>. The LLM <strong>never</strong> decides entries, exits, or position sizes. Deterministic code owns execution. Violating this boundary is a bug.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Local LLM (Ollama)</dt>
+      <dd>Qwen 2.5 7B running on localhost. Used for cheap, high-volume passes: news triage, sentiment classification, relevance filtering.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Cloud LLM (Claude)</dt>
+      <dd>Anthropic's Claude (Sonnet + Haiku). Used for higher-stakes passes: candidate thesis generation, strategy proposals, audits. Costs money — budgeted.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Token budget</dt>
+      <dd>Monthly cap on LLM spend (default $45). Tracked in real time; dashboard status bar shows current month-to-date %. Hard halt at 100% — no new cloud LLM calls.</dd>
+    </dl>
+    <dl class="gloss-term warn">
+      <dt>Prompt injection</dt>
+      <dd>Adversarial text embedded in scraped content (news articles, filings) designed to manipulate LLM output. All scraped text is treated as untrusted input and sanitized before reaching the LLM.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Trust score</dt>
+      <dd>Composite metric (0–100) of the research pipeline's reliability: source diversity, LLM agreement, audit pass rate, and staleness. Shown on the Audits page as a ring gauge.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Memorization contamination</dt>
+      <dd>When a backtest window overlaps with the LLM's training cutoff, the model may "remember" outcomes, biasing the research. Flagged on backtest reports.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="arch">
+  <h2>Architecture</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term">
+      <dt>Five-layer architecture</dt>
+      <dd>Data → Research → Strategy → Execution → Journal/Dashboard. Each layer has strict interfaces; any layer can be swapped without touching the others.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Journal</dt>
+      <dd>SQLite database (WAL mode) that records every decision, order, fill, event, cost, and audit. Single source of truth. "<strong>The journal is the product.</strong>"</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Strategy state</dt>
+      <dd>Lifecycle of a strategy:
+        <code>PROPOSED</code> → awaiting operator review;
+        <code>PAPER</code> → running in simulation;
+        <code>LIVE</code> → real money;
+        <code>PAUSED</code> → halted temporarily;
+        <code>RETIRED</code> → permanently off.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Tailscale boundary</dt>
+      <dd>The dashboard is never publicly exposed. Access is gated by Tailscale VPN — only devices on your tailnet can reach it.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Scheduler <span class="abbr">APScheduler</span></dt>
+      <dd>Cron-like job runner for periodic tasks: data refresh, research passes, reconciliation, end-of-day reports.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Hot path</dt>
+      <dd>The code path from signal → sized order → broker. Must be fast, deterministic, and LLM-free.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="metrics">
+  <h2>Metrics &amp; Backtesting</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term">
+      <dt>Sharpe ratio</dt>
+      <dd>Risk-adjusted return: (strategy return − risk-free rate) / return volatility. Higher is better; &gt;1.0 is decent, &gt;2.0 is excellent. Naive Sharpes mislead on low trade counts.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Max drawdown</dt>
+      <dd>Largest peak-to-trough decline of equity curve during the test period. Key risk metric — tells you how bad it got.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Win rate</dt>
+      <dd>Fraction of trades closed profitable. Alone is uninformative — a 40% win rate with 3:1 reward/risk beats 70% at 1:2.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>P&amp;L</dt>
+      <dd>Profit and loss. <code>net_pnl</code> in HERON is after fees/slippage. <code>pnl_pct</code> is return on capital committed to that trade.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Walk-forward test</dt>
+      <dd>Backtesting method that re-tunes parameters on a rolling training window and validates on the next out-of-sample window. Defends against overfitting compared to a single in-sample optimization.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Look-ahead bias</dt>
+      <dd>Backtest flaw where the strategy accidentally uses information that wasn't available at decision time (e.g., same-day close to decide same-day open). Silently inflates results.</dd>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================================================ -->
+<section class="gloss-section" id="ops">
+  <h2>Ops &amp; Status</h2>
+  <div class="gloss-grid">
+    <dl class="gloss-term">
+      <dt>System state</dt>
+      <dd>The dot in the top-left:
+        <code>OK</code> (green) all clear;
+        <code>WARN</code> (orange) non-blocking issue — cost warning, wash-sale exposure, or pending items;
+        <code>HALT</code> (red) order submission disabled.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Inbox</dt>
+      <dd>Strategies in <code>PROPOSED</code> state awaiting operator approval. The badge next to the nav link shows the count.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Disposition</dt>
+      <dd>A candidate's current fate:
+        <code>pending</code> (awaiting review),
+        <code>accepted</code> (promoted),
+        <code>rejected</code> (killed with reason).</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Audit</dt>
+      <dd>Post-hoc verification of a research or execution decision. Catches drift in LLM behavior, unexpected costs, or anomalous trades. Trust score aggregates audit results.</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Resilience</dt>
+      <dd>Dashboard view showing secret hygiene (are API keys leaked in logs?), startup audits (did the last launch pass checks?), and graceful shutdowns (was state flushed cleanly?).</dd>
+    </dl>
+    <dl class="gloss-term">
+      <dt>Event</dt>
+      <dd>A journaled occurrence with a severity (<code>info</code>/<code>warn</code>/<code>error</code>). Every meaningful decision, failure, or state change produces one. "<em>If the journal doesn't know about it, it's a bug.</em>"</dd>
+    </dl>
+  </div>
+</section>
+
+{% endblock %}
