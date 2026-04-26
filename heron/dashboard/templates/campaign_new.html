@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}New Campaign — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>New Campaign</h1>
+    <p class="lede">Campaigns own the paper window clock, capital allocation, and graduation lineage.</p></div>
+</div>
+
+<form method="post" class="card p-5" style="max-width: 720px;">
+  <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+    <label>ID
+      <input class="input mono" name="id" placeholder="campaign_pead_q1"
+             pattern="[a-z0-9_]+" required />
+      <div class="hint">lowercase, underscores; permanent</div>
+    </label>
+    <label>Name
+      <input class="input" name="name" placeholder="PEAD Q1 Paper Window" required />
+    </label>
+    <label>Mode
+      <select class="input" name="mode">
+        <option value="paper" selected>paper</option>
+        <option value="live">live</option>
+      </select>
+    </label>
+    <label>Capital Allocation (USD)
+      <input class="input num" name="capital" type="number" step="1" value="500" min="0" />
+    </label>
+    <label>Paper Window (days)
+      <input class="input num" name="paper_window_days" type="number" value="90" min="1" />
+    </label>
+  </div>
+  <label style="display:block; margin-top:1rem;">Description
+    <textarea class="input" name="description" rows="3" placeholder="Hypothesis, scope, anything you want to remember in 90 days."></textarea>
+  </label>
+
+  <div style="margin-top:1.25rem; display:flex; gap:.5rem;">
+    <button class="btn btn-primary" type="submit">Create (DRAFT)</button>
+    <a class="btn" href="{{ url_for('campaigns_view') }}">Cancel</a>
+  </div>
+  <div class="hint" style="margin-top:.5rem;">Campaign starts in DRAFT. Activate from the detail page to start the clock.</div>
+</form>
+{% endblock %}

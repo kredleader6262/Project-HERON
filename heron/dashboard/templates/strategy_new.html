@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}New Strategy — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>New Strategy</h1>
+    <p class="lede">Pick a template and tune parameters. Strategy code is fixed; only parameters are operator-tunable.</p></div>
+</div>
+
+{# Template selector — GET to switch templates resets the form #}
+<form method="get" action="{{ url_for('strategy_new') }}" style="margin-bottom:1rem;">
+  <label>Template
+    <select class="input" name="template" onchange="this.form.submit()">
+      {% for t in templates %}
+        <option value="{{ t.name }}" {% if template and t.name == template.name %}selected{% endif %}>
+          {{ t.display_name }}
+        </option>
+      {% endfor %}
+    </select>
+  </label>
+</form>
+
+{% if template %}
+<form method="post" action="{{ url_for('strategy_new') }}" class="card p-5" style="max-width: 960px;">
+  <input type="hidden" name="template" value="{{ template.name }}" />
+  <input type="hidden" name="submit" value="create" />
+
+  <div class="hint" style="margin-bottom:.75rem;">{{ template.description }}</div>
+
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem;">
+    <label>ID
+      <input class="input mono" name="id" placeholder="pead_v2" pattern="[a-z0-9_]+" required />
+      <div class="hint">lowercase, underscores; permanent</div>
+    </label>
+    <label>Name
+      <input class="input" name="name" placeholder="PEAD with tighter stops" required />
+    </label>
+    <label>Campaign
+      <select class="input" name="campaign_id">
+        <option value="">— none —</option>
+        {% for c in campaigns %}
+          <option value="{{ c.id }}">{{ c.id }} · {{ c.name }} ({{ c.state }})</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Description
+      <input class="input" name="description" placeholder="One-line summary" />
+    </label>
+  </div>
+  <label style="display:block; margin-top:.75rem;">Rationale
+    <textarea class="input" name="rationale" rows="2" placeholder="Why this variant? What hypothesis?"></textarea>
+  </label>
+
+  {# Group fields by `group` attribute #}
+  {% set groups = {} %}
+  {% for f in template.param_schema %}
+    {% if f.group not in groups %}{% set _ = groups.update({f.group: []}) %}{% endif %}
+    {% set _ = groups[f.group].append(f) %}
+  {% endfor %}
+
+  {% for group, fields in groups.items() %}
+    <div class="section-title" style="margin-top:1.25rem;">{{ group }}</div>
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:.75rem;">
+      {% for f in fields %}
+      <label>
+        {{ f.label }}{% if f.min is not none or f.max is not none %}
+          <span class="hint">[{{ f.min if f.min is not none else "−∞" }}–{{ f.max if f.max is not none else "∞" }}]</span>
+        {% endif %}
+        {% if f.type == "bool" %}
+          <select class="input" name="{{ f.key }}">
+            <option value="false" {% if not f.default %}selected{% endif %}>false</option>
+            <option value="true"  {% if f.default %}selected{% endif %}>true</option>
+          </select>
+        {% elif f.type == "list" %}
+          <input class="input mono" name="{{ f.key }}"
+                 value="{{ f.default | join(', ') if f.default is iterable and f.default is not string else f.default }}" />
+        {% else %}
+          <input class="input num" name="{{ f.key }}" value="{{ f.default }}"
+                 type="{{ 'number' if f.type in ('int','float') else 'text' }}"
+                 {% if f.type == "float" %}step="any"{% elif f.type == "int" %}step="1"{% endif %} />
+        {% endif %}
+        {% if f.help %}<div class="hint">{{ f.help }}</div>{% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  {% endfor %}
+
+  <div style="margin-top:1.5rem; display:flex; gap:.5rem;">
+    <button class="btn btn-primary" type="submit">Create (PROPOSED)</button>
+    <button class="btn" type="button"
+            hx-post="{{ url_for('strategy_new_preview') }}"
+            hx-include="closest form" hx-target="#preview">Preview config</button>
+    <a class="btn" href="{{ url_for('strategies_view') }}">Cancel</a>
+  </div>
+  <div class="hint" style="margin-top:.5rem;">
+    Strategy starts in PROPOSED. Approve in <a class="link" href="/proposals">Inbox</a> to begin paper trading.
+  </div>
+</form>
+
+<div id="preview" style="margin-top:1rem;"></div>
+{% else %}
+<div class="card p-5">
+  <div class="empty-title">No templates registered</div>
+  <div class="empty-hint">Register a strategy template in <code class="mono">heron.strategy.templates</code>.</div>
+</div>
+{% endif %}
+{% endblock %}

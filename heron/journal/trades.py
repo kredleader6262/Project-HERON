@@ -4,7 +4,11 @@ import json
 from datetime import datetime, timezone, timedelta
 
 from heron.config import TICKER_FAMILIES
-from heron.util import utc_now_iso as _now, utc_today as _today
+from heron.util import (
+    utc_now_iso as _now,
+    trading_day_ny,
+    trading_day_of_iso,
+)
 
 
 def _ticker_family(ticker):
@@ -79,10 +83,12 @@ def close_trade(conn, trade_id, close_price, close_reason, outcome_notes=None):
             (trade_id, trade["ticker"], family, pnl, closed_at, window_end),
         )
 
-    # PDT day-trade check: entry and exit on same calendar day
+    # PDT day-trade check: entry and exit on the same NY trading day. Using
+    # NY (not UTC) matches the broker rule — a fill at 19:00 ET still belongs
+    # to that ET day even though UTC has rolled over.
     if trade["filled_at"]:
-        entry_date = trade["filled_at"][:10]
-        exit_date = now[:10]
+        entry_date = trading_day_of_iso(trade["filled_at"])
+        exit_date = trading_day_of_iso(now)
         if entry_date == exit_date:
             conn.execute(
                 "INSERT INTO pdt_daytrades (trade_id, ticker, entry_date, exit_date) VALUES (?, ?, ?, ?)",
@@ -150,13 +156,13 @@ def get_wash_sale_exposure(conn, mode=None):
 # ── PDT Queries ──────────────────────────────────────
 
 def get_pdt_count(conn, lookback_days=5, mode=None):
-    """Count day-trades in the rolling lookback window.
-    Default 5 business days ≈ 7 calendar days for safety.
+    """Count day-trades in the rolling lookback window (NY calendar days).
 
     `mode` optionally filters to a trade mode. PDT is a broker regulation that
     only applies to live accounts; paper day-trades are not PDT-counted.
     """
-    cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days + 2)).strftime("%Y-%m-%d")
+    today_ny = datetime.fromisoformat(trading_day_ny() + "T00:00:00+00:00")
+    cutoff = (today_ny - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
     if mode:
         row = conn.execute(
             "SELECT COUNT(*) as cnt FROM pdt_daytrades p JOIN trades t ON t.id = p.trade_id "

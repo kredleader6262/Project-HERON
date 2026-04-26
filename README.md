@@ -107,17 +107,51 @@ heron journal inbox                     # show PROPOSED strategies
 
 ## Run It Daily
 
-No scheduler yet. Typical operator loop:
-
 ```bash
-heron ollama start                          # one-time per session
-heron research run --pass-type premarket    # ~08:30 ET
-# Open dashboard, review candidates, approve/reject in /candidates
-heron research run --pass-type midday       # ~12:00 ET
-# At close, EOD debrief is in /agents on the dashboard
+heron ollama start          # one-time per session
+heron run                   # foreground supervisor (Ctrl+C to stop)
 ```
 
-During market hours, `Executor.check_exits()` polls open trades on a 30s tick when wired into a runner script (see [heron/execution/executor.py](heron/execution/executor.py)).
+`heron run` schedules everything: pre-market research, executor cycles every 5 min during market hours, EOD debrief, daily health check, hourly heartbeat. All runs are journaled to `scheduler_runs`. The dashboard at `/scheduler` shows live status and lets you queue **Run Now / Pause / Resume** commands (picked up within ~10 s).
+
+Useful flags:
+
+```bash
+heron run --status                       # print job schedule + recent runs
+heron run --once research_premarket      # fire one job synchronously
+heron run --skip-preflight               # bypass preflight (testing only)
+```
+
+### Running unattended
+
+The supervisor is just a process — wrap it however you like.
+
+**Windows (NSSM):**
+```powershell
+nssm install HERON "C:\path\to\.venv\Scripts\python.exe" "-m" "heron" "run"
+nssm set HERON AppDirectory "C:\source\Project-HERON"
+nssm start HERON
+```
+
+**Linux (systemd):** drop in `/etc/systemd/system/heron.service`:
+```ini
+[Unit]
+Description=HERON trading supervisor
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/heron
+ExecStart=/opt/heron/.venv/bin/python -m heron run
+Restart=on-failure
+User=heron
+
+[Install]
+WantedBy=multi-user.target
+```
+Then `sudo systemctl enable --now heron`.
+
+The dashboard runs as a separate process — see [`heron.dashboard`](heron/dashboard/__init__.py).
 
 ## Status
 

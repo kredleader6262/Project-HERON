@@ -143,9 +143,6 @@ def test_wash_sale_rejects(setup):
     # is intentionally a no-op since paper losses aren't real tax events.)
     with pytest.raises(ValueError, match="wash_sale"):
         executor.enter_position("pead", "AAPL", 2, stop_price=145.0, target_price=160.0,
-                                mode="live"
-    with pytest.raises(ValueError, match="wash_sale"):
-        executor.enter_position("pead", "AAPL", 2, stop_price=145.0, target_price=160.0,
                                 mode="live")
 
 
@@ -258,7 +255,11 @@ def test_close_uses_deterministic_id_per_trade(setup):
     assert sum(1 for k in broker._orders if k.startswith("pead_c")) == 1
 
 
-def from heron.journal.candidates import create_candidate
+def test_entry_uses_deterministic_client_order_id(setup):
+    """Entry client_order_id must be derived from candidate + ticker + side so
+    retries dedupe at the broker. See make_entry_order_id."""
+    executor, conn, broker = setup
+    from heron.journal.candidates import create_candidate
     cid = create_candidate(conn, "pead", "AAPL", side="buy", source="test",
                            local_score=0.7, thesis="test")
     tid1, order1 = executor.enter_position(
@@ -308,14 +309,6 @@ def test_submit_failure_with_no_existing_raises(setup):
     """If submit fails AND broker has no record, the error propagates."""
     executor, conn, broker = setup
     from heron.journal.candidates import create_candidate
-    cid = create_candidate(conn, "pead", "AAPL", side="buy", source="test",
-                           local_score=0.7, thesis="test")
-    broker.submit_order = lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("hard fail"))
-    with pytest.raises(ConnectionError):
-        executor.enter_position(
-            "pead", "AAPL", 1, side="buy",
-            stop_price=145.0, target_price=160.0,
-            candidate_id=ciddates import create_candidate
     cid = create_candidate(conn, "pead", "AAPL", side="buy", source="test",
                            local_score=0.7, thesis="test")
     broker.submit_order = lambda *a, **kw: (_ for _ in ()).throw(ConnectionError("hard fail"))

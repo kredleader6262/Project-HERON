@@ -12,6 +12,39 @@ from heron.config import CACHE_DB, CACHE_DIR
 
 _JOURNAL_DDL = """
 -- ============================================================
+-- CAMPAIGNS — operator-defined experiments. Group strategies and
+-- own the paper-window clock and capital allocation. See §3.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS campaigns (
+    id                     TEXT PRIMARY KEY,         -- slug: e.g. 'pead_paper_2026q2'
+    name                   TEXT NOT NULL,
+    description            TEXT,
+    mode                   TEXT NOT NULL DEFAULT 'paper', -- paper|live
+    state                  TEXT NOT NULL DEFAULT 'DRAFT', -- DRAFT|ACTIVE|PAUSED|GRADUATED|RETIRED
+    capital_allocation_usd REAL DEFAULT 500.0,
+    paper_window_days      INTEGER NOT NULL DEFAULT 90,
+    parent_campaign_id     TEXT,                     -- live campaign points to its paper predecessor
+    started_at             TEXT,                     -- when ACTIVE began (drives day-N counter)
+    graduated_at           TEXT,
+    retired_at             TEXT,
+    retired_reason         TEXT,
+    created_at             TEXT NOT NULL,
+    updated_at             TEXT NOT NULL,
+    FOREIGN KEY (parent_campaign_id) REFERENCES campaigns(id)
+);
+
+CREATE TABLE IF NOT EXISTS campaign_state_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id     TEXT NOT NULL,
+    from_state      TEXT,
+    to_state        TEXT NOT NULL,
+    reason          TEXT,
+    operator        TEXT DEFAULT 'system',
+    ts              TEXT NOT NULL,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+);
+
+-- ============================================================
 -- STRATEGIES — first-class objects of HERON
 -- ============================================================
 CREATE TABLE IF NOT EXISTS strategies (
@@ -22,6 +55,8 @@ CREATE TABLE IF NOT EXISTS strategies (
     state           TEXT NOT NULL DEFAULT 'PROPOSED',  -- PROPOSED|PAPER|LIVE|RETIRED
     is_baseline     INTEGER NOT NULL DEFAULT 0, -- 1 = deterministic baseline variant
     parent_id       TEXT,                       -- links baseline to its LLM variant
+    campaign_id     TEXT,                       -- nullable for back-compat; new strategies should set this
+    template        TEXT,                       -- name from heron.strategy.templates registry
     config          TEXT,                       -- JSON: entry/exit rules, sizing, universe, etc.
 
     -- Per-strategy risk limits (Section 5.2)
@@ -36,7 +71,8 @@ CREATE TABLE IF NOT EXISTS strategies (
     retired_at      TEXT,
     retired_reason  TEXT,
 
-    FOREIGN KEY (parent_id) REFERENCES strategies(id)
+    FOREIGN KEY (parent_id) REFERENCES strategies(id),
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
 );
 
 -- ============================================================
@@ -255,7 +291,83 @@ CREATE INDEX IF NOT EXISTS idx_cost_date ON cost_tracking(date);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);
 CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at);
 CREATE INDEX IF NOT EXISTS idx_backtest_strategy ON backtest_reports(strategy_id, created_at);
+
+-- ============================================================
+-- SCHEDULER — run history and operator commands (Phase 3 supervisor)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS scheduler_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id          TEXT NOT NULL,
+    started_at      TEXT NOT NULL,
+    finished_at     TEXT,
+    status          TEXT NOT NULL DEFAULT 'running', -- running|ok|error|skipped
+    result_summary  TEXT,
+    error           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS scheduler_commands (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id          TEXT NOT NULL,
+    action          TEXT NOT NULL,                  -- run_now|pause|resume
+    status          TEXT NOT NULL DEFAULT 'pending', -- pending|consumed|error
+    requested_at    TEXT NOT NULL,
+    consumed_at     TEXT,
+    error           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduler_runs_job ON scheduler_runs(job_id, started_at);
+CREATE INDEX IF NOT EXISTS idx_scheduler_cmds_status ON scheduler_commands(status, requested_at);
+CREATE INDEX IF NOT EXISTS idx_campaigns_state ON campaigns(state);
 """
+
+
+def _migrate(conn):
+    """Idempotent back-compat migrations for pre-campaigns databases.
+
+    - Adds `campaign_id` and `template` columns to `strategies` if missing.
+    - Creates a `default_paper` campaign and back-fills any unattached strategies.
+    Safe to call repeatedly; runs after `_JOURNAL_DDL` so all tables exist.
+    """
+    from heron.util import utc_now_iso
+
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(strategies)").fetchall()}
+    if "campaign_id" not in cols:
+        conn.execute("ALTER TABLE strategies ADD COLUMN campaign_id TEXT REFERENCES campaigns(id)")
+    if "template" not in cols:
+        conn.execute("ALTER TABLE strategies ADD COLUMN template TEXT")
+
+    # Index requires the column to exist; create here, after the ALTER.
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_strategies_campaign ON strategies(campaign_id)")
+
+    orphan_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM strategies WHERE campaign_id IS NULL"
+    ).fetchone()["n"]
+    if orphan_count == 0:
+        conn.commit()
+        return
+
+    existing = conn.execute("SELECT id FROM campaigns WHERE id='default_paper'").fetchone()
+    if not existing:
+        now = utc_now_iso()
+        conn.execute(
+            """INSERT INTO campaigns (id, name, description, mode, state,
+                   capital_allocation_usd, paper_window_days, started_at,
+                   created_at, updated_at)
+               VALUES ('default_paper', 'Default Paper Campaign',
+                       'Auto-created by migration; holds pre-campaigns strategies.',
+                       'paper', 'ACTIVE', 500.0, 90, ?, ?, ?)""",
+            (now, now, now),
+        )
+        conn.execute(
+            """INSERT INTO campaign_state_log (campaign_id, from_state, to_state, reason, operator, ts)
+               VALUES ('default_paper', NULL, 'ACTIVE', 'auto-created by migration', 'system', ?)""",
+            (now,),
+        )
+
+    conn.execute(
+        "UPDATE strategies SET campaign_id='default_paper' WHERE campaign_id IS NULL"
+    )
+    conn.commit()
 
 
 def get_journal_conn(db_path=None):
@@ -274,5 +386,6 @@ def init_journal(conn=None):
     c = conn or get_journal_conn()
     c.executescript(_JOURNAL_DDL)
     c.commit()
+    _migrate(c)
     if conn is None:
         c.close()

@@ -41,11 +41,14 @@ def ensure_baseline(conn, parent_strategy_id):
     conn.execute(
         """INSERT INTO strategies
            (id, name, description, state, is_baseline, parent_id,
+            campaign_id, template,
             config, max_capital_pct, max_positions, drawdown_budget_pct,
             min_conviction, min_hold_days, created_at, updated_at)
-           VALUES (?, ?, ?, ?, 1, ?,  ?, ?, ?, ?,  ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, 1, ?,  ?, ?,  ?, ?, ?, ?,  ?, ?, ?, ?)""",
         (baseline_id, f"{parent['name']} (baseline)", f"Deterministic baseline for {parent_strategy_id}",
          parent["state"], parent_strategy_id,
+         parent["campaign_id"] if "campaign_id" in parent.keys() else None,
+         parent["template"] if "template" in parent.keys() else None,
          parent["config"], parent["max_capital_pct"], parent["max_positions"],
          parent["drawdown_budget_pct"], 0.0,  # min_conviction=0 for baseline
          parent["min_hold_days"], now, now),

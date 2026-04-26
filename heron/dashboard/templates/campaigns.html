@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Campaigns — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Campaigns</h1>
+    <p class="lede">{{ campaigns|length }} total · campaigns own the paper window clock and capital allocation.</p>
+  </div>
+  <div>
+    <a class="btn btn-primary" href="{{ url_for('campaign_new') }}">+ New campaign</a>
+  </div>
+</div>
+
+<div class="card overflow-hidden">
+{% if campaigns %}
+<table class="htable">
+  <thead>
+    <tr>
+      <th>ID</th><th>Name</th><th>Mode</th><th>State</th>
+      <th class="r">Capital</th><th class="r">Window</th>
+      <th class="r">Day</th><th class="r">Strats</th>
+      <th>Created</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for c in campaigns %}
+    <tr>
+      <td><a class="link mono" href="/campaign/{{ c.id }}">{{ c.id }}</a></td>
+      <td>{{ c.name }}</td>
+      <td><span class="pill">{{ c.mode }}</span></td>
+      <td><span class="pill s-{{ c.state }}">{{ c.state }}</span></td>
+      <td class="r num">${{ "%.0f"|format(c.capital_allocation_usd) }}</td>
+      <td class="r num">{{ c.paper_window_days }}d</td>
+      <td class="r num">{% if c.days is not none %}{{ c.days }}/{{ c.paper_window_days }}{% else %}—{% endif %}</td>
+      <td class="r num">{{ c.strategy_count }}</td>
+      <td class="dim mono">{{ c.created_at[:10] }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty"><div class="empty-title">No campaigns yet</div>
+  <div class="empty-hint">A campaign is the unit of paper-trading experiment. Create one with <a class="link" href="{{ url_for('campaign_new') }}">+ New campaign</a>.</div></div>
+{% endif %}
+</div>
+{% endblock %}

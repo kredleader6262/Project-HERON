@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ campaign.name }} — Campaign{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>{{ campaign.name }}</h1>
+    <p class="lede mono">{{ campaign.id }} · {{ campaign.mode }} ·
+      <span class="pill s-{{ campaign.state }}">{{ campaign.state }}</span>
+    </p>
+  </div>
+  <div style="display:flex; gap:.4rem;">
+    {% if campaign.state == "DRAFT" %}
+      <form method="post" action="/campaign/{{ campaign.id }}/start">
+        <button class="btn btn-primary" type="submit">Activate</button></form>
+    {% elif campaign.state == "ACTIVE" %}
+      <form method="post" action="/campaign/{{ campaign.id }}/pause">
+        <button class="btn" type="submit">Pause</button></form>
+      <form method="post" action="/campaign/{{ campaign.id }}/graduate"
+            onsubmit="return confirm('Graduate this campaign? Strategies should already be promoted to LIVE separately.');">
+        <button class="btn btn-primary" type="submit">Graduate</button></form>
+    {% elif campaign.state == "PAUSED" %}
+      <form method="post" action="/campaign/{{ campaign.id }}/resume">
+        <button class="btn btn-primary" type="submit">Resume</button></form>
+    {% endif %}
+    {% if campaign.state in ("DRAFT", "ACTIVE", "PAUSED", "GRADUATED") %}
+      <form method="post" action="/campaign/{{ campaign.id }}/retire"
+            onsubmit="return confirm('Retire this campaign?');">
+        <button class="btn" type="submit">Retire</button></form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid" style="display:grid; grid-template-columns: repeat(4, 1fr); gap:1rem; margin-bottom:1rem;">
+  <div class="card p-4">
+    <div class="section-title">Day</div>
+    <div class="num" style="font-size:1.5rem;">
+      {% if days is not none %}{{ days }} / {{ campaign.paper_window_days }}{% else %}—{% endif %}
+    </div>
+    <div class="hint">since activation</div>
+  </div>
+  <div class="card p-4">
+    <div class="section-title">Capital</div>
+    <div class="num" style="font-size:1.5rem;">${{ "%.0f"|format(campaign.capital_allocation_usd) }}</div>
+    <div class="hint">allocation</div>
+  </div>
+  <div class="card p-4">
+    <div class="section-title">Strategies</div>
+    <div class="num" style="font-size:1.5rem;">{{ strategies|length }}</div>
+    <div class="hint">attached</div>
+  </div>
+  <div class="card p-4">
+    <div class="section-title">Trades</div>
+    <div class="num" style="font-size:1.5rem;">{{ trades|length }}</div>
+    <div class="hint">recent</div>
+  </div>
+</div>
+
+{% if campaign.description %}
+<div class="card p-4" style="margin-bottom:1rem;">
+  <div class="section-title">Hypothesis</div>
+  <div>{{ campaign.description }}</div>
+</div>
+{% endif %}
+
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head">
+    <div class="section-title">Strategies</div>
+    <a class="btn btn-primary" href="{{ url_for('strategy_new') }}">+ Add strategy</a>
+  </div>
+  {% if strategies %}
+  <table class="htable">
+    <thead><tr>
+      <th>ID</th><th>Name</th><th>Template</th><th>State</th><th>Baseline</th><th>Created</th>
+    </tr></thead>
+    <tbody>
+    {% for s in strategies %}
+      <tr>
+        <td><a class="link mono" href="/strategy/{{ s.id }}">{{ s.id }}</a></td>
+        <td>{{ s.name }}</td>
+        <td class="mono dim">{{ s.template or "—" }}</td>
+        <td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td>
+        <td>{% if s.is_baseline %}<span class="pill pill-brand">baseline</span>{% else %}<span class="dim">—</span>{% endif %}</td>
+        <td class="dim mono">{{ s.created_at[:10] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No strategies attached</div>
+    <div class="empty-hint">Add one via the New Strategy form, selecting this campaign.</div></div>
+  {% endif %}
+</div>
+
+<div class="card overflow-hidden">
+  <div class="card-head"><div class="section-title">State history</div></div>
+  <table class="htable">
+    <thead><tr><th>When</th><th>From</th><th>To</th><th>Reason</th><th>Operator</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr>
+        <td class="dim mono">{{ h.ts[:19] }}</td>
+        <td><span class="pill s-{{ h.from_state or 'NEW' }}">{{ h.from_state or "—" }}</span></td>
+        <td><span class="pill s-{{ h.to_state }}">{{ h.to_state }}</span></td>
+        <td>{{ h.reason }}</td>
+        <td class="dim">{{ h.operator }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

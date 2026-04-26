@@ -64,3 +64,12 @@ Format:
 ## FK constraints in journal trades require real candidate rows in tests
 - **Symptom**: Passing `candidate_id=42` to `enter_position` from a test without first creating the candidate row → `sqlite3.IntegrityError: FOREIGN KEY constraint failed` from `create_trade`.
 - **Actual fix**: In tests, `create_candidate(conn, strategy_id, ticker, ...)` first and pass the returned id.
+
+## "Today" for trading rules is NY, not UTC
+- **Symptom**: Daily-entry cap, daily-loss cap, and PDT same-day detection used `datetime.now(timezone.utc).strftime("%Y-%m-%d")` (and a `+2 day` cushion in `get_pdt_count`). A fill at 19:00 ET rolled to the next UTC date, so PDT same-day detection silently missed late-session closes.
+- **Actual fix**: `heron/util.py` exposes `trading_day_ny()` (current NY calendar date), `trading_day_of_iso()` (NY day for a stored UTC-ISO timestamp), and `trading_day_start_utc_iso()` (UTC-ISO threshold of NY-today 00:00 ET — use this when comparing against stored UTC ISO columns). Use NY helpers for any rule expressed in market-calendar terms; keep UTC for technical timestamps (`utc_now_iso`, `utc_today` for month keys).
+
+## Review-gate blocks PROMOTIONS, not entries
+- Spec §11: monthly review is required before PAPER→LIVE promotion. It does NOT gate individual trade entries (`pre_trade_checks` must not import `is_review_current`). Enforcement lives in `dashboard/__init__.py` `/strategy/<id>/promote`, which calls `is_review_current(conn)` and logs a `promotion_blocked` event on refusal.
+- If you see `is_review_current` imported in `heron/strategy/risk.py`, that's docstring drift — remove it.
+

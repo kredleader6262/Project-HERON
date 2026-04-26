@@ -2,18 +2,20 @@
 
 Every check returns (ok: bool, reason: str). All must pass before any entry.
 These enforce: wash-sale, PDT, exposure limits, daily loss cap, position limits,
-stale-quote kill switch, and monthly review gate.
+and stale-quote kill switch.
+
+The monthly review gate (Project-HERON.md §11) blocks PROMOTIONS, not entries
+— enforced in the dashboard's promote route via `is_review_current`, not here.
 
 See Project-HERON.md Section 5 and trading-safety.instructions.md.
 """
-
-from datetime import datetime, timezone
 
 from heron.config import QUOTE_STALE_SECONDS
 from heron.journal.trades import (
     check_wash_sale, get_pdt_count, can_daytrade, list_trades,
 )
-from heron.journal.ops import is_review_current, log_event
+from heron.journal.ops import log_event
+from heron.util import trading_day_start_utc_iso
 
 
 # ── Check Results ──────────────────────────────────
@@ -100,8 +102,12 @@ def check_position_count(conn, max_positions=3, mode=None):
 
 
 def check_daily_entries(conn, max_daily=3, mode=None):
-    """Reject if max daily new entries (in `mode`) exceeded."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """Reject if max daily new entries (in `mode`) exceeded.
+
+    "Today" = America/New_York trading day, not UTC. A trade entered at
+    19:00 ET counts toward today, even though it's tomorrow in UTC.
+    """
+    today = trading_day_start_utc_iso()
     sql = "SELECT COUNT(*) FROM trades WHERE created_at >= ?"
     params = [today]
     if mode:
@@ -114,8 +120,11 @@ def check_daily_entries(conn, max_daily=3, mode=None):
 
 
 def check_daily_loss(conn, equity, max_pct=0.08, mode=None):
-    """Reject if realized daily loss (in `mode`) exceeds max_pct of equity."""
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    """Reject if realized daily loss (in `mode`) exceeds max_pct of equity.
+
+    "Today" = NY trading day. See `check_daily_entries`.
+    """
+    today = trading_day_start_utc_iso()
     sql = ("SELECT COALESCE(SUM(pnl), 0) FROM trades "
            "WHERE close_filled_at >= ? AND pnl IS NOT NULL")
     params = [today]

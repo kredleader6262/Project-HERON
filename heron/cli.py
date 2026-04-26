@@ -129,21 +129,37 @@ def demo():
         check_wash_sale, get_pdt_count,
     )
     from heron.journal.ops import log_cost, get_monthly_cost, log_event, get_events
+    from heron.journal import campaigns as jcampaigns
 
     conn = get_journal_conn()
     init_journal(conn)
 
     click.echo("=== HERON Journal Demo ===\n")
 
+    # Campaign first — strategies attach to it
+    click.echo("--- Creating campaign ---")
+    try:
+        jcampaigns.create_campaign(
+            conn, "demo_campaign", "Demo Paper Campaign",
+            description="Demo campaign for the journal walk-through.",
+            mode="paper", capital_allocation_usd=500.0, paper_window_days=90,
+            state="ACTIVE",
+        )
+        click.echo("  Created demo_campaign (ACTIVE)")
+    except sqlite3.IntegrityError:
+        click.echo("  (campaign already exists, skipping)")
+
     # Strategies
-    click.echo("--- Creating strategies ---")
+    click.echo("\n--- Creating strategies ---")
     try:
         create_strategy(conn, "pead_v1", "PEAD LLM Variant",
                         description="Post-earnings drift with LLM filtering",
-                        rationale="Academic alpha, PDT-safe holds")
+                        rationale="Academic alpha, PDT-safe holds",
+                        campaign_id="demo_campaign", template="pead")
         create_strategy(conn, "pead_v1_baseline", "PEAD Deterministic Baseline",
-                        is_baseline=True, parent_id="pead_v1")
-        click.echo("  Created pead_v1 + baseline")
+                        is_baseline=True, parent_id="pead_v1",
+                        campaign_id="demo_campaign", template="pead")
+        click.echo("  Created pead_v1 + baseline (attached to demo_campaign)")
     except sqlite3.IntegrityError:
         click.echo("  (strategies already exist, skipping)")
 
@@ -948,6 +964,89 @@ def resilience_secrets(env, log_file):
             click.echo(f"    line {f['line']}: {f['pattern']}")
     if r["status"] != "clean":
         raise SystemExit(1)
+
+
+@cli.command(name="run")
+@click.option("--mode", type=click.Choice(["paper", "live"]), default="paper",
+              help="Trading mode.")
+@click.option("--once", "once_job", default=None,
+              help="Fire one job synchronously and exit (e.g. research_premarket).")
+@click.option("--status", "show_status", is_flag=True,
+              help="Show current job schedule + recent runs and exit.")
+@click.option("--skip-preflight", is_flag=True, help="Skip preflight (testing only).")
+def run_cmd(mode, once_job, show_status, skip_preflight):
+    """Start the supervisor — schedules research/executor/debrief/health jobs."""
+    from heron.runtime.preflight import preflight
+    from heron.runtime.supervisor import Supervisor
+    from heron.journal import get_journal_conn, init_journal
+
+    if show_status:
+        conn = get_journal_conn()
+        init_journal(conn)
+        sup = Supervisor(mode=mode, conn=conn)
+        try:
+            s = sup.status()
+            click.echo(f"Mode: {s['mode']}")
+            click.echo("\nJobs:")
+            for j in s["jobs"]:
+                click.echo(f"  {j['id']:<22} next={j['next_run'] or '—'}")
+            click.echo("\nRecent runs:")
+            for r in s["recent_runs"][:10]:
+                click.echo(f"  {r['started_at']:<32} {r['job_id']:<22} {r['status']}")
+        finally:
+            sup.stop(wait=False)
+        return
+
+    if once_job:
+        conn = get_journal_conn()
+        init_journal(conn)
+        sup = Supervisor(mode=mode, conn=conn)
+        try:
+            click.echo(f"Running {once_job} (mode={mode})…")
+            result = sup.run_once(once_job)
+            click.echo(json.dumps(result, indent=2, default=str))
+        finally:
+            sup.stop(wait=False)
+        return
+
+    # Foreground supervisor
+    conn = get_journal_conn()
+    init_journal(conn)
+
+    if not skip_preflight:
+        click.echo("Preflight…")
+        pf = preflight(conn, mode=mode)
+        for w in pf["warnings"]:
+            click.echo(f"  warn: {w}")
+        if not pf["ok"]:
+            click.echo("Preflight blocked:", err=True)
+            for b in pf["blockers"]:
+                click.echo(f"  ✗ {b}", err=True)
+            click.echo("Use --skip-preflight to override (testing only).", err=True)
+            raise SystemExit(2)
+        click.echo("  ok")
+
+    sup = Supervisor(mode=mode, conn=conn)
+
+    import signal
+    def _signal_handler(signum, frame):
+        click.echo(f"\nShutdown signal: {signal.Signals(signum).name}")
+        sup.stop(wait=True)
+    for s in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(s, _signal_handler)
+        except (ValueError, AttributeError, OSError):
+            pass
+
+    sup.start()
+    click.echo(f"Supervisor running (mode={mode}). Ctrl+C to stop.")
+    try:
+        # Block until shutdown. Signal handler stops the supervisor; loop exits.
+        import time as _time
+        while sup.scheduler.running:
+            _time.sleep(1)
+    except KeyboardInterrupt:
+        sup.stop(wait=True)
 
 
 if __name__ == "__main__":

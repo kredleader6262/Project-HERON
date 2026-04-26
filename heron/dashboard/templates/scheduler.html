@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Scheduler — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Scheduler</h1>
+    <p class="lede">APScheduler-driven background jobs. Run <code class="mono">heron run</code> in a separate process; commands queued here are picked up within ~10s.</p></div>
+</div>
+
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head"><div class="section-title">Jobs</div></div>
+  <table class="htable">
+    <thead><tr><th>ID</th><th>Description</th><th class="r">Actions</th></tr></thead>
+    <tbody>
+    {% for j in jobs %}
+      <tr>
+        <td class="mono">{{ j.id }}</td>
+        <td>{{ j.name }}</td>
+        <td class="r">
+          <form method="post" action="/scheduler/{{ j.id }}/run_now" style="display:inline;">
+            <button class="btn btn-primary" type="submit">Run now</button></form>
+          <form method="post" action="/scheduler/{{ j.id }}/pause" style="display:inline;">
+            <button class="btn" type="submit">Pause</button></form>
+          <form method="post" action="/scheduler/{{ j.id }}/resume" style="display:inline;">
+            <button class="btn" type="submit">Resume</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head"><div class="section-title">Pending commands</div></div>
+  {% if commands %}
+  <table class="htable">
+    <thead><tr><th>When</th><th>Job</th><th>Action</th><th>Status</th><th>Error</th></tr></thead>
+    <tbody>
+    {% for c in commands %}
+      <tr>
+        <td class="dim mono">{{ c.requested_at[:19] }}</td>
+        <td class="mono">{{ c.job_id }}</td>
+        <td>{{ c.action }}</td>
+        <td><span class="pill">{{ c.status }}</span></td>
+        <td class="dim mono">{{ c.error or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-hint">No commands queued.</div></div>
+  {% endif %}
+</div>
+
+<div class="card overflow-hidden">
+  <div class="card-head"><div class="section-title">Recent runs</div></div>
+  {% if recent %}
+  <table class="htable">
+    <thead><tr>
+      <th>Started</th><th>Job</th><th>Status</th><th class="r">Duration</th><th>Result</th>
+    </tr></thead>
+    <tbody>
+    {% for r in recent %}
+      <tr>
+        <td class="dim mono">{{ r.started_at[:19] }}</td>
+        <td class="mono">{{ r.job_id }}</td>
+        <td><span class="pill {% if r.status == 'ok' %}pill-ok{% elif r.status == 'error' %}pill-err{% endif %}">{{ r.status }}</span></td>
+        <td class="r num">{% if r.duration_ms is not none %}{{ r.duration_ms }}ms{% else %}—{% endif %}</td>
+        <td class="dim mono" style="max-width:480px; overflow:hidden; text-overflow:ellipsis;">{{ r.result_summary or r.error or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No runs yet</div>
+    <div class="empty-hint">Start the supervisor with <code class="mono">heron run</code>.</div></div>
+  {% endif %}
+</div>
+{% endblock %}

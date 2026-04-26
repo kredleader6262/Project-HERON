@@ -18,17 +18,20 @@ VALID_TRANSITIONS = {
 
 
 def create_strategy(conn, id, name, description="", rationale="", config=None,
-                    is_baseline=False, parent_id=None, **limits):
+                    is_baseline=False, parent_id=None, campaign_id=None,
+                    template=None, **limits):
     """Insert a new strategy in PROPOSED state."""
     now = _now()
     conn.execute(
         """INSERT INTO strategies
-           (id, name, description, rationale, state, is_baseline, parent_id, config,
+           (id, name, description, rationale, state, is_baseline, parent_id,
+            campaign_id, template, config,
             max_capital_pct, max_positions, drawdown_budget_pct, min_conviction, min_hold_days,
             created_at, updated_at)
-           VALUES (?, ?, ?, ?, 'PROPOSED', ?, ?, ?,  ?, ?, ?, ?, ?,  ?, ?)""",
+           VALUES (?, ?, ?, ?, 'PROPOSED', ?, ?,  ?, ?, ?,  ?, ?, ?, ?, ?,  ?, ?)""",
         (id, name, description, rationale,
          1 if is_baseline else 0, parent_id,
+         campaign_id, template,
          json.dumps(config) if config else None,
          limits.get("max_capital_pct", 0.15),
          limits.get("max_positions", 3),

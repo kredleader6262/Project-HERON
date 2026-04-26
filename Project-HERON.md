@@ -93,6 +93,20 @@ PROPOSED → PAPER → LIVE → RETIRED
 
 Auto-retirement always notifies the operator and is reversible with explicit operator action.
 
+### 3.5 Campaigns
+
+A **campaign** is the first-class container above strategies — the unit of paper-trading experiment. A campaign owns the 90-day paper window clock, the capital allocation pool, and the graduation lineage that lets a successful experiment promote into live.
+
+States: **DRAFT → ACTIVE → PAUSED → GRADUATED → RETIRED**. The clock starts on the DRAFT→ACTIVE transition (`started_at`). Strategies attach to a campaign via `strategies.campaign_id`; multiple variants of the same hypothesis (LLM and deterministic baseline) belong to the same campaign so their equity curves are scored against one shared window.
+
+Campaign object contents:
+- Name, description (the hypothesis), mode (paper/live).
+- Capital allocation in USD, paper-window length in days.
+- `started_at`, `graduated_at`, `retired_at`, `parent_campaign_id` (set when graduating spawns a follow-on campaign).
+- State-transition log preserves operator intent and reasons.
+
+The dashboard (`/campaigns`, `/campaign/<id>`) shows day-N progress and lets the operator transition state. The supervisor's executor cycle iterates ACTIVE campaigns first, then their PAPER/LIVE strategies — pause a campaign and all its strategies stop submitting candidates without touching their individual states.
+
 ---
 
 ## 4. System Architecture

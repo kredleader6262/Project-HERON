@@ -6,6 +6,9 @@
     <h1>Strategies</h1>
     <p class="lede">{{ strategies|length }} in {{ mode_label }} mode · {{ strategies|selectattr('is_baseline')|list|length }} baseline variant(s)</p>
   </div>
+  <div>
+    <a class="btn btn-primary" href="{{ url_for('strategy_new') }}">+ New strategy</a>
+  </div>
 </div>
 
 <div class="card overflow-hidden">
@@ -13,7 +16,7 @@
   <table class="htable">
     <thead>
       <tr>
-        <th>ID</th><th>Name</th><th>State</th><th>Baseline</th>
+        <th>ID</th><th>Name</th><th>Template</th><th>Campaign</th><th>State</th><th>Baseline</th>
         <th class="r">Cap</th><th class="r">Max Pos</th><th class="r">DD Budget</th><th class="r">Min Hold</th><th>Created</th>
       </tr>
     </thead>
@@ -22,6 +25,8 @@
       <tr>
         <td><a class="link mono" href="/strategy/{{ s.id }}">{{ s.id }}</a></td>
         <td>{{ s.name }}</td>
+        <td class="mono dim">{{ s.template or "—" }}</td>
+        <td class="mono">{% if s.campaign_id %}<a class="link" href="/campaign/{{ s.campaign_id }}">{{ s.campaign_id }}</a>{% else %}<span class="dim">—</span>{% endif %}</td>
         <td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td>
         <td>{% if s.is_baseline %}<span class="pill pill-brand">baseline</span>{% else %}<span class="dim">—</span>{% endif %}</td>
         <td class="r num">{{ "%.0f"|format(s.max_capital_pct * 100) }}%</td>
@@ -35,7 +40,7 @@
   </table>
   {% else %}
   <div class="empty"><div class="empty-title">No strategies yet</div>
-    <div class="empty-hint">Seed a baseline with <code>heron baseline init</code>.</div></div>
+    <div class="empty-hint">Seed a baseline with <code>heron baseline init</code> or create one above.</div></div>
   {% endif %}
 </div>
 {% endblock %}

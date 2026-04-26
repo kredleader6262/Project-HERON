@@ -456,6 +456,7 @@
       <a href="/" class="wordmark">HERON</a>
       <nav class="nav">
         <a href="/"           class="{% if active_path == '/' %}active{% endif %}">Overview</a>
+        <a href="/campaigns"  class="{% if active_path.startswith('/campaign') %}active{% endif %}">Campaigns</a>
         <a href="/strategies" class="{% if active_path.startswith('/strateg') %}active{% endif %}">Strategies</a>
         <a href="/proposals"  class="{% if active_path == '/proposals' %}active{% endif %}">
           Inbox{% if sb.pending_strategies %}<span class="count">{{ sb.pending_strategies }}</span>{% endif %}
@@ -469,6 +470,7 @@
         <a href="/backtests"  class="{% if active_path.startswith('/backtests') %}active{% endif %}">Backtests</a>
         <a href="/costs"      class="{% if active_path == '/costs' %}active{% endif %}">Costs</a>
         <a href="/resilience" class="{% if active_path == '/resilience' %}active{% endif %}">Resilience</a>
+        <a href="/scheduler"  class="{% if active_path == '/scheduler' %}active{% endif %}">Scheduler</a>
         <a href="/health"     class="{% if active_path == '/health' %}active{% endif %}">Health</a>
         <a href="/glossary"   class="{% if active_path == '/glossary' %}active{% endif %}">Glossary</a>
       </nav>

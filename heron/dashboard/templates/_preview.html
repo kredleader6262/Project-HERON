@@ -1,0 +1,12 @@
+{# HTMX inline preview swap #}
+{% if error %}
+<div class="card p-4" style="border-color: var(--err);">
+  <div class="section-title" style="color: var(--err);">Invalid parameters</div>
+  <div class="mono">{{ error }}</div>
+</div>
+{% else %}
+<div class="card p-4">
+  <div class="section-title">Resolved config</div>
+  <pre class="mono" style="font-size:.85rem; white-space:pre-wrap;">{{ config | tojson(indent=2) }}</pre>
+</div>
+{% endif %}

@@ -234,8 +234,14 @@ class TestDashboardApproval:
         assert s["state"] == "RETIRED"
 
     def test_promote_strategy(self, client, journal_conn):
+        from heron.journal.ops import create_review, file_review
+        from datetime import datetime, timezone
         create_strategy(journal_conn, "test_v1", "Test")
         transition_strategy(journal_conn, "test_v1", "PAPER")
+        # Promotion requires a filed monthly review (Project-HERON.md §11).
+        ym = datetime.now(timezone.utc).strftime("%Y-%m")
+        create_review(journal_conn, ym)
+        file_review(journal_conn, ym, "ok", "go")
 
         resp = client.post("/strategy/test_v1/promote",
                            data={"reason": "Beat test passed"},
@@ -244,6 +250,18 @@ class TestDashboardApproval:
 
         s = get_strategy(journal_conn, "test_v1")
         assert s["state"] == "LIVE"
+
+    def test_promote_strategy_blocked_without_review(self, client, journal_conn):
+        """Promotion must be blocked if this month's review isn't filed."""
+        create_strategy(journal_conn, "test_v1", "Test")
+        transition_strategy(journal_conn, "test_v1", "PAPER")
+
+        resp = client.post("/strategy/test_v1/promote",
+                           data={"reason": "try promote"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        s = get_strategy(journal_conn, "test_v1")
+        assert s["state"] == "PAPER"
 
     def test_retire_strategy(self, client, journal_conn):
         create_strategy(journal_conn, "test_v1", "Test")

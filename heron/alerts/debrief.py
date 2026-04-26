@@ -14,6 +14,7 @@ from heron.journal.trades import list_trades
 from heron.research.claude import call
 from heron.research.progress import Spinner
 from heron.alerts.discord import send as discord_send, dashboard_link
+from heron.util import trading_day_ny, trading_day_of_iso
 
 log = logging.getLogger(__name__)
 
@@ -35,11 +36,14 @@ Return JSON: {{"summary": "...", "flag_for_attention": true/false}}"""
 
 
 def _today_utc():
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # Retained name for API compat; returns the NY trading day so the debrief
+    # captures trades closed late in the session (e.g., 21:00 ET) that would
+    # otherwise fall into tomorrow under pure UTC.
+    return trading_day_ny()
 
 
 def _is_today(iso_ts, today):
-    return iso_ts and iso_ts[:10] == today
+    return bool(iso_ts) and trading_day_of_iso(iso_ts) == today
 
 
 def gather(conn, date=None):

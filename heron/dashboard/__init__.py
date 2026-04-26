@@ -6,10 +6,12 @@ See Project-HERON.md Section 4.5 for dashboard views.
 
 from flask import Flask, render_template, request, redirect, url_for, abort, flash, jsonify, make_response
 from heron.journal import get_journal_conn, init_journal
-from heron.journal.strategies import list_strategies, get_strategy, get_state_history, transition_strategy
+from heron.journal.strategies import list_strategies, get_strategy, get_state_history, transition_strategy, create_strategy
 from heron.journal.candidates import list_candidates, get_candidate, dispose_candidate
 from heron.journal.trades import list_trades, get_wash_sale_exposure, get_pdt_count
-from heron.journal.ops import get_monthly_cost, get_daily_costs, get_events, get_review, get_audits
+from heron.journal.ops import get_monthly_cost, get_daily_costs, get_events, get_review, get_audits, is_review_current, log_event
+from heron.journal import campaigns as jcampaigns
+from heron.strategy import templates as stemplates
 from heron.dashboard import mode as vmode
 
 import os
@@ -536,9 +538,19 @@ def create_app():
 
     @app.route("/strategy/<strategy_id>/promote", methods=["POST"])
     def promote_strategy(strategy_id):
-        """Promote a PAPER strategy → LIVE."""
+        """Promote a PAPER strategy → LIVE.
+
+        Blocked unless this month's review is filed (Project-HERON.md §11).
+        """
         conn = get_conn()
         reason = request.form.get("reason", "Operator promoted to live")
+        if not is_review_current(conn):
+            log_event(conn, "promotion_blocked",
+                      f"Promotion of {strategy_id} blocked: monthly review not filed",
+                      severity="warn", source="dashboard.promote")
+            flash("Promotion blocked — file this month's review first.", "error")
+            conn.close()
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
         try:
             transition_strategy(conn, strategy_id, "LIVE",
                                 reason=reason, operator="operator")
@@ -586,5 +598,180 @@ def create_app():
             flash(str(e), "error")
         conn.close()
         return redirect(url_for("candidates_view"))
+
+    # ── Campaigns ──────────────────────────────────────────────────────────
+
+    @app.route("/campaigns")
+    def campaigns_view():
+        conn = get_conn()
+        rows = jcampaigns.list_campaigns(conn)
+        items = []
+        for r in rows:
+            d = dict(r)
+            d["days"] = jcampaigns.days_active(conn, r["id"])
+            d["strategy_count"] = conn.execute(
+                "SELECT COUNT(*) FROM strategies WHERE campaign_id=?", (r["id"],)
+            ).fetchone()[0]
+            items.append(d)
+        conn.close()
+        return render_template("campaigns.html", campaigns=items)
+
+    @app.route("/campaign/new", methods=["GET", "POST"])
+    def campaign_new():
+        if request.method == "POST":
+            conn = get_conn()
+            cid = (request.form.get("id") or "").strip()
+            name = (request.form.get("name") or "").strip()
+            if not cid or not name:
+                flash("ID and name required.", "error")
+                conn.close()
+                return redirect(url_for("campaign_new"))
+            try:
+                jcampaigns.create_campaign(
+                    conn, cid, name,
+                    description=request.form.get("description", ""),
+                    mode=request.form.get("mode", "paper"),
+                    capital_allocation_usd=float(request.form.get("capital", 500)),
+                    paper_window_days=int(request.form.get("paper_window_days", 90)),
+                )
+                flash(f"Campaign {cid} created (DRAFT).", "success")
+                conn.close()
+                return redirect(url_for("campaign_detail", campaign_id=cid))
+            except (ValueError, Exception) as e:
+                flash(str(e), "error")
+                conn.close()
+        return render_template("campaign_new.html")
+
+    @app.route("/campaign/<campaign_id>")
+    def campaign_detail(campaign_id):
+        conn = get_conn()
+        c = jcampaigns.get_campaign(conn, campaign_id)
+        if not c:
+            conn.close()
+            abort(404)
+        strats = jcampaigns.get_campaign_strategies(conn, campaign_id)
+        history = jcampaigns.get_state_history(conn, campaign_id)
+        days = jcampaigns.days_active(conn, campaign_id)
+        # Trades for any strategy in this campaign
+        trades = []
+        if strats:
+            ids = ",".join("?" for _ in strats)
+            trades = conn.execute(
+                f"SELECT * FROM trades WHERE strategy_id IN ({ids}) ORDER BY created_at DESC LIMIT 50",
+                [s["id"] for s in strats],
+            ).fetchall()
+        conn.close()
+        return render_template("campaign_detail.html",
+                               campaign=c, strategies=strats, history=history,
+                               trades=trades, days=days)
+
+    @app.route("/campaign/<campaign_id>/<action>", methods=["POST"])
+    def campaign_transition(campaign_id, action):
+        target = {"start": "ACTIVE", "pause": "PAUSED", "resume": "ACTIVE",
+                  "graduate": "GRADUATED", "retire": "RETIRED"}.get(action)
+        if not target:
+            abort(404)
+        conn = get_conn()
+        try:
+            jcampaigns.transition_campaign(
+                conn, campaign_id, target,
+                reason=request.form.get("reason", f"Operator {action}"),
+                operator="operator",
+            )
+            flash(f"Campaign {campaign_id} → {target}", "success")
+        except ValueError as e:
+            flash(str(e), "error")
+        conn.close()
+        return redirect(url_for("campaign_detail", campaign_id=campaign_id))
+
+    # ── New strategy from template ─────────────────────────────────────────
+
+    @app.route("/strategy/new", methods=["GET", "POST"])
+    def strategy_new():
+        templates = stemplates.list_templates()
+        selected_name = request.values.get("template") or (templates[0].name if templates else None)
+        template = stemplates.get_template(selected_name) if selected_name else None
+
+        if request.method == "POST" and request.form.get("submit") == "create":
+            conn = get_conn()
+            sid = (request.form.get("id") or "").strip()
+            name = (request.form.get("name") or "").strip()
+            campaign_id = (request.form.get("campaign_id") or "").strip() or None
+            if not sid or not name or not template:
+                flash("ID, name, and template required.", "error")
+                conn.close()
+                return redirect(url_for("strategy_new", template=selected_name))
+            try:
+                overrides = {f.key: request.form.get(f.key) for f in template.param_schema
+                             if request.form.get(f.key) not in (None, "")}
+                cfg = template.build_config(overrides)
+                create_strategy(
+                    conn, sid, name,
+                    description=request.form.get("description", ""),
+                    rationale=request.form.get("rationale", "Operator-authored from template"),
+                    config=cfg,
+                    template=template.name,
+                    campaign_id=campaign_id,
+                )
+                flash(f"Strategy {sid} created (PROPOSED). Approve in Inbox to start paper trading.", "success")
+                conn.close()
+                return redirect(url_for("strategy_detail", strategy_id=sid))
+            except (ValueError, Exception) as e:
+                flash(str(e), "error")
+                conn.close()
+
+        conn = get_conn()
+        active_campaigns = jcampaigns.list_campaigns(conn, state="ACTIVE")
+        draft_campaigns = jcampaigns.list_campaigns(conn, state="DRAFT")
+        conn.close()
+        return render_template(
+            "strategy_new.html",
+            templates=templates, template=template,
+            campaigns=list(active_campaigns) + list(draft_campaigns),
+            form=request.form,
+        )
+
+    @app.route("/strategy/new/preview", methods=["POST"])
+    def strategy_new_preview():
+        """HTMX endpoint: show resolved config from current form values."""
+        name = request.form.get("template")
+        try:
+            t = stemplates.get_template(name)
+            overrides = {f.key: request.form.get(f.key) for f in t.param_schema
+                         if request.form.get(f.key) not in (None, "")}
+            cfg = t.build_config(overrides)
+            return render_template("_preview.html", config=cfg, error=None)
+        except (KeyError, ValueError) as e:
+            return render_template("_preview.html", config=None, error=str(e))
+
+    # ── Scheduler ──────────────────────────────────────────────────────────
+
+    @app.route("/scheduler")
+    def scheduler_view():
+        conn = get_conn()
+        recent = conn.execute(
+            "SELECT * FROM scheduler_runs ORDER BY started_at DESC LIMIT 50"
+        ).fetchall()
+        commands = conn.execute(
+            "SELECT * FROM scheduler_commands ORDER BY id DESC LIMIT 20"
+        ).fetchall()
+        # Static job catalog (the supervisor process owns the live schedule)
+        from heron.runtime.supervisor import DEFAULT_JOBS
+        jobs = [{"id": jid, "name": desc} for jid, _fn, _trig, desc in DEFAULT_JOBS]
+        conn.close()
+        return render_template("scheduler.html",
+                               jobs=jobs, recent=recent, commands=commands)
+
+    @app.route("/scheduler/<job_id>/<action>", methods=["POST"])
+    def scheduler_command(job_id, action):
+        from heron.runtime.supervisor import request_command
+        conn = get_conn()
+        try:
+            request_command(conn, job_id, action)
+            flash(f"Queued {action} for {job_id}.", "success")
+        except ValueError as e:
+            flash(str(e), "error")
+        conn.close()
+        return redirect(url_for("scheduler_view"))
 
     return app
