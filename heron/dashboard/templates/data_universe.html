@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <h1 class="text-2xl font-bold">Universe snapshots</h1>
+  <span class="dim text-sm">Operator-curated point-in-time membership for survivorship-aware replays.</span>
+</div>
+
+<div class="card p-4 mb-5">
+  <div class="section-title">Record snapshot</div>
+  <form action="/data/universe/snapshot" method="post" class="grid grid-cols-1 md:grid-cols-6 gap-3 mt-3 items-end">
+    <label class="text-xs">Snapshot date
+      <input type="date" name="snapshot_date" required
+             class="block w-full mt-1 px-2 py-1 mono"
+             style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+    </label>
+    <label class="text-xs md:col-span-3">Tickers (comma-separated)
+      <input type="text" name="tickers" required placeholder="AAPL,MSFT,NVDA,GOOG,AMZN"
+             class="block w-full mt-1 px-2 py-1 mono"
+             style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+    </label>
+    <label class="text-xs md:col-span-2">Note (optional)
+      <input type="text" name="note" placeholder="e.g. PEAD universe v2"
+             class="block w-full mt-1 px-2 py-1 mono"
+             style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+    </label>
+    <div class="md:col-span-6">
+      <button type="submit" class="btn btn-brand">Save snapshot</button>
+      <span class="text-xs dim ml-3">
+        The backtest runner will prefer the most recent snapshot ≤ <code class="mono">as_of</code>
+        when resolving a strategy's universe. Empty universe falls back to <code class="mono">PEAD_UNIVERSE</code>.
+      </span>
+    </div>
+  </form>
+</div>
+
+<div class="section-title">Recent snapshots ({{ snapshots|length }})</div>
+<div class="card overflow-hidden">
+  {% if not snapshots %}
+    <div class="p-4 dim">No snapshots recorded yet.</div>
+  {% else %}
+  <table class="htable">
+    <thead><tr><th>Date</th><th class="r">N</th><th>Members</th><th>Recorded</th></tr></thead>
+    <tbody>
+    {% for s in snapshots %}
+      <tr>
+        <td class="mono">{{ s.snapshot_date }}</td>
+        <td class="r num">{{ s.n }}</td>
+        <td class="mono text-xs">
+          {{ s.tickers[:12]|join(", ") }}{% if s.tickers|length > 12 %} … +{{ s.tickers|length - 12 }} more{% endif %}
+        </td>
+        <td class="dim text-xs mono">{{ s.created_at }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

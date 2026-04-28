@@ -44,6 +44,36 @@ CREATE TABLE IF NOT EXISTS fetch_log (
 CREATE INDEX IF NOT EXISTS idx_ohlcv_ticker_tf ON ohlcv(ticker, timeframe);
 CREATE INDEX IF NOT EXISTS idx_news_published ON news_articles(published_at);
 CREATE INDEX IF NOT EXISTS idx_news_source ON news_articles(source);
+
+CREATE TABLE IF NOT EXISTS earnings_events (
+    ticker         TEXT NOT NULL,
+    event_date     TEXT NOT NULL,          -- YYYY-MM-DD (announce date)
+    event_time     TEXT,                   -- 'bmo' | 'amc' | 'dmh' | NULL
+    eps_actual     REAL,
+    eps_estimate   REAL,
+    surprise_pct   REAL,                   -- (actual - estimate) / |estimate| * 100
+    revenue_actual REAL,
+    revenue_estimate REAL,
+    source         TEXT NOT NULL,
+    fetched_at     TEXT NOT NULL,
+    PRIMARY KEY (ticker, event_date, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_earnings_date ON earnings_events(event_date);
+CREATE INDEX IF NOT EXISTS idx_earnings_ticker ON earnings_events(ticker);
+
+-- Operator-curated point-in-time universe snapshots. Used by the backtest
+-- runner when `as_of` is set; falls back to PEAD_UNIVERSE if no snapshot.
+CREATE TABLE IF NOT EXISTS universe_snapshots (
+    snapshot_date  TEXT NOT NULL,          -- YYYY-MM-DD; universe is current at this date
+    ticker         TEXT NOT NULL,
+    source         TEXT NOT NULL DEFAULT 'manual',
+    note           TEXT,
+    created_at     TEXT NOT NULL,
+    PRIMARY KEY (snapshot_date, ticker)
+);
+
+CREATE INDEX IF NOT EXISTS idx_universe_date ON universe_snapshots(snapshot_date);
 """
 
 from heron.util import utc_now_iso as _now  # noqa: E402
@@ -62,9 +92,59 @@ def get_conn(db_path=None):
 def init_db(conn=None):
     c = conn or get_conn()
     c.executescript(_DDL)
+    _migrate_earnings_pit(c)
     c.commit()
     if conn is None:
         c.close()
+
+
+def _migrate_earnings_pit(conn):
+    """Idempotently add point-in-time columns to earnings_events.
+
+    `as_of_ts`     — when this record's values became known (default = fetched_at).
+    `superseded_at`— NULL = current; non-NULL = restated and replaced by a newer row.
+    Backfills both columns on existing rows so older databases keep working.
+    """
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(earnings_events)").fetchall()}
+    if "as_of_ts" not in cols:
+        conn.execute("ALTER TABLE earnings_events ADD COLUMN as_of_ts TEXT")
+        conn.execute("UPDATE earnings_events SET as_of_ts = fetched_at WHERE as_of_ts IS NULL")
+    if "superseded_at" not in cols:
+        conn.execute("ALTER TABLE earnings_events ADD COLUMN superseded_at TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_earnings_pit "
+                 "ON earnings_events(ticker, event_date, as_of_ts)")
+    # The original PRIMARY KEY (ticker, event_date, source) prevents storing
+    # multiple PIT versions of the same announcement. Drop it via the standard
+    # SQLite recreate-and-copy pattern, but only once.
+    pk_cols = [r for r in conn.execute("PRAGMA table_info(earnings_events)").fetchall() if r[5]]
+    if len(pk_cols) == 3:  # original PK still in place
+        conn.executescript("""
+            CREATE TABLE earnings_events_new (
+                ticker         TEXT NOT NULL,
+                event_date     TEXT NOT NULL,
+                event_time     TEXT,
+                eps_actual     REAL,
+                eps_estimate   REAL,
+                surprise_pct   REAL,
+                revenue_actual REAL,
+                revenue_estimate REAL,
+                source         TEXT NOT NULL,
+                fetched_at     TEXT NOT NULL,
+                as_of_ts       TEXT NOT NULL,
+                superseded_at  TEXT,
+                PRIMARY KEY (ticker, event_date, source, as_of_ts)
+            );
+            INSERT INTO earnings_events_new
+              SELECT ticker, event_date, event_time, eps_actual, eps_estimate,
+                     surprise_pct, revenue_actual, revenue_estimate, source,
+                     fetched_at, COALESCE(as_of_ts, fetched_at), superseded_at
+                FROM earnings_events;
+            DROP TABLE earnings_events;
+            ALTER TABLE earnings_events_new RENAME TO earnings_events;
+            CREATE INDEX idx_earnings_date ON earnings_events(event_date);
+            CREATE INDEX idx_earnings_ticker ON earnings_events(ticker);
+            CREATE INDEX idx_earnings_pit ON earnings_events(ticker, event_date, as_of_ts);
+        """)
 
 
 # --- OHLCV ---

@@ -17,7 +17,6 @@ caller (CLI, tests, or a future historical-news replayer) is responsible
 for producing them deterministically.
 """
 
-import random
 from collections import defaultdict
 
 from heron.backtest.costs import apply_slippage, sell_fees, slippage_bps
@@ -57,11 +56,10 @@ def run_backtest(strategy, bars, candidates, *,
     """Replay `strategy` over `bars`, entering on `candidates`.
 
     Returns dict with equity_curve, trades, params snapshot.
-    Deterministic: same inputs → same output.
+    Deterministic: same inputs → same output. The seed is recorded on the
+    saved report; consumers (seeders, walk-forward) are responsible for using
+    it to drive any stochastic input.
     """
-    rng = random.Random(seed)  # reserved for future stochastic extensions
-    _ = rng  # currently unused; kept for determinism contract
-
     bars_by_ticker = _bars_by_date(bars)
     all_dates = sorted({d for series in bars_by_ticker.values() for d, _ in series})
     if start_date:

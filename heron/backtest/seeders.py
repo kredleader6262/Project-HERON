@@ -1,8 +1,11 @@
 """Deterministic candidate seeders for backtests.
 
-Real historical earnings-surprise data is out of scope for M13. These seeders
-generate reproducible synthetic candidate streams from cached bars, which is
-sufficient for validating strategy logic and demonstrating determinism.
+Two sources:
+- `synthetic_pead_candidates`: reproducible fake stream from cached bars.
+  Useful for smoke tests, but momentum-correlated by construction.
+- `real_pead_candidates`: pulls cached `earnings_events` (e.g. Finnhub) and
+  emits one candidate per real surprise. Network-free at replay time —
+  only reads the cache.
 
 Seeders MUST be pure functions of their inputs. No wall-clock, no RNG without
 a seed, no network calls.
@@ -35,10 +38,8 @@ def synthetic_pead_candidates(bars, *, universe, surprise_threshold=5.0,
     candidates = []
     for ticker in sorted(by_ticker):
         series = by_ticker[ticker]
-        # Emit candidate every `frequency_days` bars
         for i in range(frequency_days, len(series), frequency_days):
             date = series[i][0]
-            # Mix in price momentum as a pseudo-surprise signal
             prev = series[i - frequency_days][1]
             cur = series[i][1]
             momentum = (cur - prev) / prev * 100 if prev else 0
@@ -55,3 +56,57 @@ def synthetic_pead_candidates(bars, *, universe, surprise_threshold=5.0,
             })
     candidates.sort(key=lambda c: (c["date"], c["ticker"]))
     return candidates
+
+
+def real_pead_candidates(conn, *, universe, start=None, end=None,
+                         surprise_threshold=5.0, source=None, as_of=None):
+    """Pull real earnings surprises from the `earnings_events` cache.
+
+    `as_of`: when set, return the values that were known at that timestamp
+    (PIT). Restated values after `as_of` are ignored. When None, returns
+    current values.
+
+    Conviction is a deterministic function of |surprise_pct|:
+      conviction = clamp(0.5 + abs(surprise_pct)/40, 0.5, 0.95)
+    so a 20% beat => 1.0 -> capped at 0.95; a 5% beat => 0.625.
+
+    `announced_hours_ago` is set from event_time:
+      bmo (before market open) -> 6 hours (announced at ~7am, signal at ~1pm)
+      amc (after market close) -> 17 hours (announced previous PM, signal next AM)
+      else                      -> 12 hours
+    """
+    from heron.data.earnings import get_earnings_events
+
+    universe_set = {t.upper() for t in universe} if universe else None
+    rows = get_earnings_events(
+        conn,
+        start=start,
+        end=end,
+        tickers=sorted(universe_set) if universe_set else None,
+        source=source,
+        min_abs_surprise=surprise_threshold,
+        as_of=as_of,
+    )
+    candidates = []
+    for r in rows:
+        s = r.get("surprise_pct")
+        if s is None:
+            continue
+        conviction = round(min(0.95, max(0.5, 0.5 + abs(s) / 40.0)), 2)
+        et = (r.get("event_time") or "").lower()
+        if et == "bmo":
+            ann = 6
+        elif et == "amc":
+            ann = 17
+        else:
+            ann = 12
+        candidates.append({
+            "date": r["event_date"],
+            "ticker": r["ticker"],
+            "surprise_pct": float(s),
+            "announced_hours_ago": ann,
+            "conviction": conviction,
+        })
+    candidates.sort(key=lambda c: (c["date"], c["ticker"]))
+    return candidates
+

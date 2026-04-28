@@ -7,7 +7,7 @@ from heron.journal.strategies import create_strategy
 from heron.journal.trades import (
     create_trade, fill_trade, close_trade, get_trade, list_trades,
     check_wash_sale, get_wash_sale_exposure, get_pdt_count, can_daytrade,
-    _ticker_family,
+    _ticker_family, summarize_trades,
 )
 
 
@@ -151,3 +151,39 @@ def test_client_order_id_unique(conn):
     with pytest.raises(Exception):  # UNIQUE constraint
         create_trade(conn, "pead", "AAPL", "buy", "paper", 10,
                      client_order_id="pead_123_AAPL_buy")
+
+
+def test_summarize_trades(conn):
+    # Win
+    t1 = create_trade(conn, "pead", "AAPL", "buy", "paper", 10)
+    fill_trade(conn, t1, 100.0)
+    close_trade(conn, t1, 110.0, "target")
+    # Loss
+    t2 = create_trade(conn, "pead", "MSFT", "buy", "paper", 5)
+    fill_trade(conn, t2, 200.0)
+    close_trade(conn, t2, 190.0, "stop")
+    # Open
+    t3 = create_trade(conn, "pead", "GOOGL", "buy", "paper", 2)
+    fill_trade(conn, t3, 50.0)
+
+    trades = list_trades(conn)
+    s = summarize_trades(trades)
+    assert s["total"] == 3
+    assert s["closed"] == 2
+    assert s["open"] == 1
+    assert s["wins"] == 1
+    assert s["losses"] == 1
+    assert s["total_pnl"] == 50.0   # +100 win + (-50) loss
+    assert s["win_rate"] == 0.5
+    # by_reason buckets exist
+    assert "target" in s["by_reason"]
+    assert "stop" in s["by_reason"]
+    assert s["by_reason"]["target"]["n"] == 1
+    assert s["by_reason"]["stop"]["pnl"] == -50.0
+
+
+def test_summarize_trades_empty():
+    s = summarize_trades([])
+    assert s["total"] == 0
+    assert s["closed"] == 0
+    assert s["win_rate"] == 0.0

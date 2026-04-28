@@ -71,4 +71,91 @@
     {% else %}<div class="empty empty-hint">No shutdown events recorded.</div>{% endif %}
   </div>
 </div>
+
+{# ── Health (merged in from /health) ─────────────────────────── #}
+<h2 id="health" class="text-xl font-bold mt-8 mb-3">Health</h2>
+<p class="dim text-sm mb-4">Risk exposure, cost breakdown, and recent activity.</p>
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="card stat">
+    <div class="stat-label">Month Cost</div>
+    <div class="stat-value num {% if month_cost > 40 %}pnl-neg{% endif %}">${{ "%.2f"|format(month_cost) }}</div>
+    <div class="stat-sub">of $45.00 ceiling</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Wash-Sale Lots</div>
+    <div class="stat-value num {% if wash_lots|length > 0 %}pnl-neg{% endif %}">{{ wash_lots|length }}</div>
+    <div class="stat-sub">{{ 'active 30d window' if wash_lots|length > 0 else 'clean' }}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">PDT Count</div>
+    <div class="stat-value num {% if pdt_count >= 3 %}pnl-neg{% endif %}">{{ pdt_count }} / 3</div>
+    <div class="stat-sub">rolling 5 sessions</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Recent Errors</div>
+    {% set err_count = events|selectattr("severity", "equalto", "error")|list|length %}
+    <div class="stat-value num {% if err_count > 0 %}pnl-neg{% endif %}">{{ err_count }}</div>
+    <div class="stat-sub">in last {{ events|length }} events</div>
+  </div>
+</div>
+
+{% if wash_lots %}
+<div class="section-title">Active wash-sale lots</div>
+<div class="card overflow-hidden mb-6">
+  <table class="htable">
+    <thead><tr><th>Ticker</th><th>Family</th><th class="r">Loss</th><th>Closed</th><th>Window ends</th></tr></thead>
+    <tbody>
+    {% for w in wash_lots %}
+      <tr>
+        <td class="mono font-semibold">{{ w.ticker }}</td>
+        <td class="dim">{{ w.ticker_family }}</td>
+        <td class="r num pnl-neg">${{ "%.2f"|format(w.loss_amount) }}</td>
+        <td class="dim mono">{{ w.closed_at[:10] }}</td>
+        <td class="dim mono">{{ w.window_end[:10] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if daily_costs %}
+<div class="section-title">Today's cost breakdown</div>
+<div class="card overflow-hidden mb-6">
+  <table class="htable">
+    <thead><tr><th>Model</th><th class="r">Tokens in</th><th class="r">Tokens out</th><th class="r">Cost</th></tr></thead>
+    <tbody>
+    {% for d in daily_costs %}
+      <tr>
+        <td class="mono">{{ d.model }}</td>
+        <td class="r num dim">{{ "{:,}".format(d.tokens_in) }}</td>
+        <td class="r num dim">{{ "{:,}".format(d.tokens_out) }}</td>
+        <td class="r num">${{ "%.4f"|format(d.cost) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<div class="section-title">Event log</div>
+<div class="card overflow-hidden">
+  {% if events %}
+  <table class="htable">
+    <thead><tr><th>Time</th><th>Severity</th><th>Source</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td class="dim mono">{{ e.created_at[:19] }}</td>
+        <td><span class="pill pill-{% if e.severity in ('error','critical') %}err{% elif e.severity == 'warn' %}warn{% else %}muted{% endif %}">{{ e.severity }}</span></td>
+        <td class="dim mono">{{ e.source or "" }}</td>
+        <td class="mono">{{ e.event_type }}</td>
+        <td>{{ e.message }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No events logged.</div>{% endif %}
+</div>
 {% endblock %}

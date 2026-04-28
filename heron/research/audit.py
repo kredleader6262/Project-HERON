@@ -234,3 +234,73 @@ def compute_trust_score(conn, window_days=None):
         "breakdown": breakdown,
         "divergent": divergent,
     }
+
+
+# --- Contamination static audit (A4) ---
+
+import ast
+import os
+
+# Functions that read time-sensitive data and MUST be called with as_of= in
+# strategy / research code paths used by backtests. Keys are the unqualified
+# callable names we expect to see at the callsite.
+_PIT_GUARDED_CALLS = {
+    "get_earnings_events": "Earnings reads must pass as_of= to avoid restatement leakage.",
+    "get_articles":        "News reads must pass as_of= for point-in-time replay.",
+    "fetch_news":          "News fetches must pass as_of= for point-in-time replay.",
+    "fetch_articles":      "RSS reads must pass as_of= for point-in-time replay.",
+    "real_pead_candidates": "Backtest seeders must pass as_of= for PIT replay.",
+}
+
+
+def _call_name(node):
+    """Return the trailing attribute / name of a Call node, or None."""
+    fn = node.func
+    if isinstance(fn, ast.Attribute):
+        return fn.attr
+    if isinstance(fn, ast.Name):
+        return fn.id
+    return None
+
+
+def contamination_audit(path):
+    """Static AST scan for PIT-leak patterns.
+
+    Returns a list of `{file, line, rule, severity, message}` findings.
+    `path` may be a single .py file or a directory (scanned recursively).
+    """
+    targets = []
+    if os.path.isdir(path):
+        for root, _, files in os.walk(path):
+            for f in files:
+                if f.endswith(".py"):
+                    targets.append(os.path.join(root, f))
+    else:
+        targets.append(path)
+
+    findings = []
+    for fp in targets:
+        try:
+            src = open(fp, encoding="utf-8").read()
+            tree = ast.parse(src, filename=fp)
+        except (OSError, SyntaxError) as e:
+            findings.append({"file": fp, "line": 0, "rule": "parse_error",
+                             "severity": "error", "message": str(e)})
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = _call_name(node)
+            if name not in _PIT_GUARDED_CALLS:
+                continue
+            kwargs = {kw.arg for kw in node.keywords if kw.arg}
+            if "as_of" not in kwargs:
+                findings.append({
+                    "file": fp,
+                    "line": node.lineno,
+                    "rule": f"missing_as_of:{name}",
+                    "severity": "error",
+                    "message": _PIT_GUARDED_CALLS[name],
+                })
+    return findings
+

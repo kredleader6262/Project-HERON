@@ -4,6 +4,8 @@ Local access only (Tailscale VPN boundary). No public exposure.
 See Project-HERON.md Section 4.5 for dashboard views.
 """
 
+import json
+
 from flask import Flask, render_template, request, redirect, url_for, abort, flash, jsonify, make_response
 from heron.journal import get_journal_conn, init_journal
 from heron.journal.strategies import list_strategies, get_strategy, get_state_history, transition_strategy, create_strategy
@@ -162,7 +164,16 @@ def create_app():
 
     @app.route("/")
     def index():
-        """Today at a glance — filtered by global paper/live/all mode."""
+        """Mission Control — primary operator surface."""
+        return mission_control()
+
+    @app.route("/overview")
+    def overview_view():
+        """Today at a glance — filtered by global paper/live/all mode.
+
+        Legacy index page; survives as a Mission Control drill-down for
+        operators who want the original dashboard layout.
+        """
         conn = get_conn()
         m = vmode.get_mode()
         states = vmode.strategy_states(m)
@@ -192,6 +203,108 @@ def create_app():
                                month_cost=month_cost,
                                events=events)
 
+    def mission_control():
+        """Inbox / Actions / State — the unified operator surface (C1+C2)."""
+        from heron.config import MONTHLY_COST_CEILING
+        from heron.strategy.policy import (
+            assemble_state, evaluate_policies, current_system_mode,
+        )
+        from heron.strategy.portfolio import compute_allocations
+        from heron.research.audit import contamination_audit
+        from heron.runtime.supervisor import DEFAULT_JOBS
+
+        conn = get_conn()
+        m = vmode.get_mode()
+        tmode = vmode.trade_mode(m)
+
+        # ── Inbox sources ────────────────────────────────────────────────
+        proposed = list_strategies(conn, state="PROPOSED")
+        pending_candidates = []
+        try:
+            states = vmode.strategy_states(m)
+            clause, params = vmode.in_clause(states)
+            rows = conn.execute(
+                f"SELECT c.* FROM candidates c JOIN strategies s ON s.id=c.strategy_id "
+                f"WHERE c.disposition='pending' AND s.state {clause} "
+                f"ORDER BY c.created_at DESC LIMIT 10",
+                params,
+            ).fetchall()
+            pending_candidates = [dict(r) for r in rows]
+        except Exception:
+            pass
+
+        sys_mode = current_system_mode(conn)
+        try:
+            pol_state = assemble_state(conn, mode=tmode)
+            pol_actions = evaluate_policies(pol_state)
+        except Exception:
+            pol_state, pol_actions = {}, []
+        fired_actions = [a for a in pol_actions if a.get("action") not in ("ok", "error")]
+
+        # Monthly review status — operator owes a review if not current.
+        try:
+            review_ok = is_review_current(conn)
+        except Exception:
+            review_ok = True
+
+        # Contamination findings — cheap AST walk over strategy modules.
+        try:
+            contamination = contamination_audit("heron/strategy")
+        except Exception:
+            contamination = []
+
+        # ── State snapshot ───────────────────────────────────────────────
+        open_trades = list_trades(conn, open_only=True, mode=tmode)
+        all_trades = list_trades(conn, mode=tmode)
+        month_cost = get_monthly_cost(conn) or 0.0
+        ceiling = MONTHLY_COST_CEILING or 45.0
+        try:
+            equity = pol_state.get("equity") or 0.0
+            allocs = compute_allocations(conn, equity, mode=tmode) if equity else {}
+        except Exception:
+            allocs = {}
+        events = get_events(conn, limit=8)
+
+        # ── Action shortcuts ─────────────────────────────────────────────
+        valid_jobs = {jid for jid, _f, _t, _d in DEFAULT_JOBS}
+        immediate_actions = [
+            {"job_id": "executor_cycle", "label": "Executor cycle",
+             "hint": "Process pending candidates + reconcile."},
+            {"job_id": "research_premarket", "label": "Premarket research",
+             "hint": "News + classify + propose candidates."},
+            {"job_id": "eod_debrief", "label": "EOD debrief",
+             "hint": "Daily summary + journal flush."},
+            {"job_id": "daily_health", "label": "Health check",
+             "hint": "Resilience + SLOs."},
+        ]
+        immediate_actions = [a for a in immediate_actions if a["job_id"] in valid_jobs]
+
+        conn.close()
+
+        inbox_count = (len(proposed) + len(pending_candidates) +
+                       len(fired_actions) + (0 if review_ok else 1) +
+                       len(contamination))
+
+        return render_template(
+            "mission_control.html",
+            proposed=proposed,
+            pending_candidates=pending_candidates,
+            sys_mode=sys_mode,
+            policy_state=pol_state,
+            fired_actions=fired_actions,
+            review_ok=review_ok,
+            contamination=contamination,
+            open_trades=open_trades,
+            all_trades=all_trades,
+            month_cost=month_cost,
+            cost_ceiling=ceiling,
+            allocations=allocs,
+            equity=pol_state.get("equity") or 0.0,
+            recent_events=events,
+            immediate_actions=immediate_actions,
+            inbox_count=inbox_count,
+        )
+
     @app.route("/strategies")
     def strategies_view():
         """Strategy portfolio — filtered by mode."""
@@ -208,6 +321,7 @@ def create_app():
     @app.route("/strategy/<strategy_id>")
     def strategy_detail(strategy_id):
         """Single strategy detail with trades and state history."""
+        from heron.backtest.sweep import SWEEPABLE_AXES
         conn = get_conn()
         strat = get_strategy(conn, strategy_id)
         if not strat:
@@ -216,18 +330,38 @@ def create_app():
         history = get_state_history(conn, strategy_id)
         trades = list_trades(conn, strategy_id=strategy_id)
         candidates = list_candidates(conn, strategy_id=strategy_id)
+        # Sweeps for this strategy.
+        sweeps = conn.execute(
+            """SELECT sweep_id, COUNT(*) AS n, MIN(created_at) AS started_at,
+                      MAX(total_return) AS best_return
+               FROM backtest_reports
+               WHERE strategy_id=? AND sweep_id IS NOT NULL
+               GROUP BY sweep_id ORDER BY started_at DESC LIMIT 10""",
+            (strategy_id,),
+        ).fetchall()
+        sweeps = [dict(r) for r in sweeps]
+        # Strategy config keys we know how to sweep.
+        try:
+            cfg = json.loads(strat["config"]) if strat["config"] else {}
+        except (TypeError, json.JSONDecodeError):
+            cfg = {}
+        sweep_options = [k for k in SWEEPABLE_AXES if k in cfg]
         conn.close()
         return render_template("strategy_detail.html",
                                strategy=strat, history=history,
-                               trades=trades, candidates=candidates)
+                               trades=trades, candidates=candidates,
+                               sweeps=sweeps, sweep_options=sweep_options,
+                               strategy_config=cfg)
 
     @app.route("/trades")
     def trades_view():
         """Trade log — filtered by global mode."""
+        from heron.journal.trades import summarize_trades
         conn = get_conn()
         trades = list_trades(conn, mode=vmode.trade_mode(vmode.get_mode()))
+        summary = summarize_trades(trades)
         conn.close()
-        return render_template("trades.html", trades=trades)
+        return render_template("trades.html", trades=trades, summary=summary)
 
     @app.route("/candidates")
     def candidates_view():
@@ -255,19 +389,8 @@ def create_app():
 
     @app.route("/health")
     def health_view():
-        """System health."""
-        conn = get_conn()
-        events = get_events(conn, limit=50)
-        month_cost = get_monthly_cost(conn)
-        daily = get_daily_costs(conn)
-        # Health page always shows live exposure — PDT/wash are broker-level facts.
-        wash = get_wash_sale_exposure(conn, mode="live")
-        pdt = get_pdt_count(conn, mode="live")
-        conn.close()
-        return render_template("health.html",
-                               events=events, month_cost=month_cost,
-                               daily_costs=daily, wash_lots=wash,
-                               pdt_count=pdt)
+        """Back-compat redirect — Health is now a section of /resilience."""
+        return redirect(url_for("resilience_view") + "#health", code=301)
 
     @app.route("/proposals")
     def proposals_view():
@@ -292,10 +415,186 @@ def create_app():
         conn.close()
         return render_template("audits.html", score=score, audits=recent)
 
+    @app.route("/audits/contamination")
+    def audits_contamination_view():
+        """Static AST scan for PIT-leak patterns in strategy code."""
+        import os as _os
+        from heron.research.audit import contamination_audit
+        target = request.args.get("path") or _os.path.join("heron", "strategy")
+        findings = contamination_audit(target)
+        return render_template("audits_contamination.html",
+                               target=target, findings=findings)
+
+    @app.route("/portfolio")
+    def portfolio_view():
+        """Per-strategy capital allocations after parity / drawdown / crowding."""
+        from heron.config import PORTFOLIO_CONFIG
+        from heron.journal.strategies import list_strategies
+        from heron.strategy.portfolio import (
+            compute_allocations, _parity_factor, _strategy_drawdown, _strategy_tags,
+        )
+        from heron.strategy.policy import current_system_mode
+
+        mode = request.args.get("mode") or "paper"
+        conn = get_conn()
+        try:
+            equity = float(request.args.get("equity") or 0) or 10000.0
+            allocs = compute_allocations(conn, equity, mode=mode)
+            states = ("PAPER", "LIVE") if mode == "live" else ("PAPER",)
+            rows = [s for s in list_strategies(conn) if s["state"] in states]
+            allocations = []
+            for s in rows:
+                pf = _parity_factor(s, conn)
+                dd = _strategy_drawdown(conn, s["id"], mode)
+                budget_dollars = float(s["drawdown_budget_pct"] or 0.05) * equity
+                df = 1.0 if budget_dollars <= 0 else max(0.0, min(1.0, 1.0 + dd / budget_dollars))
+                allocations.append({
+                    "id": s["id"], "state": s["state"],
+                    "tags": _strategy_tags(s),
+                    "base_pct": min(float(s["max_capital_pct"] or 0.15),
+                                    float(PORTFOLIO_CONFIG.get("max_per_strategy", 0.30))),
+                    "parity_factor": pf,
+                    "drawdown_factor": df,
+                    "alloc_pct": allocs.get(s["id"], 0.0),
+                })
+            allocations.sort(key=lambda r: r["alloc_pct"], reverse=True)
+            sys_mode = current_system_mode(conn)
+        finally:
+            conn.close()
+        return render_template(
+            "portfolio.html",
+            mode=mode, equity=equity, allocations=allocations,
+            total_pct=sum(allocs.values()),
+            max_total=float(PORTFOLIO_CONFIG.get("max_total_exposure", 0.80)),
+            system_mode=sys_mode,
+            active_path="/portfolio",
+        )
+
+    @app.route("/policies")
+    def policies_view():
+        """Show policy rules, current state evaluation, and system mode."""
+        from heron.config import POLICIES
+        from heron.strategy.policy import (
+            assemble_state, evaluate_policies, current_system_mode,
+        )
+        mode = request.args.get("mode") or "paper"
+        conn = get_conn()
+        try:
+            state = assemble_state(conn, mode=mode, equity=10000.0)
+            actions = evaluate_policies(state)
+            fired_ids = {a["id"] for a in actions}
+            sys_mode = current_system_mode(conn)
+            events = conn.execute(
+                "SELECT * FROM events WHERE event_type='system_mode' "
+                "ORDER BY created_at DESC LIMIT 25"
+            ).fetchall()
+        finally:
+            conn.close()
+        return render_template(
+            "policies.html",
+            rules=POLICIES, state=state, fired_ids=fired_ids,
+            system_mode=sys_mode, events=events,
+            active_path="/policies",
+        )
+
+    @app.route("/policies/override", methods=["POST"])
+    def policies_override():
+        """Operator-forced system mode transition (NORMAL/DERISK/SAFE)."""
+        from heron.strategy.policy import set_system_mode, VALID_MODES
+        new_mode = (request.form.get("mode") or "").strip().upper()
+        reason = (request.form.get("reason") or "").strip()
+        if new_mode not in VALID_MODES:
+            flash(f"Invalid mode: {new_mode}", "error")
+            return redirect(url_for("policies_view"))
+        if not reason:
+            flash("Reason is required for an override.", "error")
+            return redirect(url_for("policies_view"))
+        conn = get_conn()
+        try:
+            prior = set_system_mode(conn, new_mode, reason=reason,
+                                    operator="dashboard", triggered_by=["operator_override"])
+            log_event(conn, "system_mode_override",
+                      f"{prior} -> {new_mode}: {reason}",
+                      severity="warn", source="dashboard.policies")
+        finally:
+            conn.close()
+        flash(f"System mode set to {new_mode}.", "success")
+        return redirect(url_for("policies_view"))
+
     @app.route("/glossary")
     def glossary_view():
         """Vocabulary reference for HERON's domain terms."""
         return render_template("glossary.html")
+
+    @app.route("/setup", methods=["GET", "POST"])
+    def setup_view():
+        """First-run setup wizard. Mirrors `heron init` CLI."""
+        from heron.runtime.setup import (
+            plan_initial_setup, apply_initial_setup, is_already_setup,
+            SetupAlreadyDoneError,
+        )
+
+        conn = get_conn()
+        already = is_already_setup(conn)
+
+        if request.method == "GET":
+            conn.close()
+            return render_template("setup.html",
+                                   already=already, plan=None, applied=None,
+                                   form={
+                                       "capital": "500",
+                                       "campaign_name": "Default Paper Campaign",
+                                       "cadence": "premarket_eod",
+                                       "max_capital_pct": "0.15",
+                                       "max_positions": "3",
+                                       "drawdown_budget_pct": "0.05",
+                                   })
+
+        # POST: action = "plan" or "apply"
+        action = request.form.get("action", "plan")
+        form = {
+            "capital": request.form.get("capital", "500"),
+            "campaign_name": request.form.get("campaign_name", "Default Paper Campaign"),
+            "cadence": request.form.get("cadence", "premarket_eod"),
+            "max_capital_pct": request.form.get("max_capital_pct", "0.15"),
+            "max_positions": request.form.get("max_positions", "3"),
+            "drawdown_budget_pct": request.form.get("drawdown_budget_pct", "0.05"),
+        }
+
+        try:
+            plan = plan_initial_setup(
+                capital_usd=float(form["capital"]),
+                campaign_name=form["campaign_name"],
+                cadence=form["cadence"],
+                max_capital_pct=float(form["max_capital_pct"]),
+                max_positions=int(form["max_positions"]),
+                drawdown_budget_pct=float(form["drawdown_budget_pct"]),
+            )
+        except (ValueError, TypeError) as e:
+            flash(str(e), "error")
+            conn.close()
+            return render_template("setup.html",
+                                   already=already, plan=None, applied=None, form=form)
+
+        applied = None
+        if action == "apply":
+            if already:
+                flash("Already set up — refusing to re-seed.", "error")
+            else:
+                try:
+                    applied = apply_initial_setup(conn, plan)
+                    flash(f"Setup complete: {applied['campaign_id']} "
+                          f"with {len(applied['strategy_ids'])} strategies.",
+                          "success")
+                except SetupAlreadyDoneError as e:
+                    flash(str(e), "error")
+                except Exception as e:  # noqa: BLE001
+                    flash(f"Apply failed: {e}", "error")
+
+        conn.close()
+        return render_template("setup.html",
+                               already=already or applied is not None,
+                               plan=plan, applied=applied, form=form)
 
     # ── Research Agents page ──────────────────────────────
     # Tracks the state of any running research pass so the UI can poll.
@@ -424,21 +723,517 @@ def create_app():
 
     @app.route("/backtests/<int:report_id>")
     def backtest_detail(report_id):
-        """Single backtest report detail."""
+        """Single backtest report detail with equity / drawdown / overlays."""
         import json as _json
-        from heron.backtest import get_report
+        from heron.backtest import (
+            get_report, spy_benchmark_curve, drawdown_curve, find_baseline_report,
+        )
+        from heron.backtest.regimes import vol_buckets_from_spy, tag_trades, regime_metrics
+        from heron.backtest.walkforward import list_walkforward_children
+        from heron.data.cache import get_bars
         conn = get_conn()
         report = get_report(conn, report_id)
-        conn.close()
         if not report:
+            conn.close()
             flash(f"Backtest report {report_id} not found", "error")
             return redirect(url_for("backtests_view"))
         metrics = _json.loads(report["metrics_json"])
         trades = _json.loads(report["trades_json"])
         params = _json.loads(report["params_json"])
-        return render_template("backtest_detail.html",
-                               report=report, metrics=metrics,
-                               trades=trades, params=params)
+        equity_curve = metrics.get("equity_curve") or []
+        if not equity_curve:
+            equity_curve = [
+                {"date": report["start_date"], "equity": 0.0},
+                {"date": report["end_date"], "equity": 0.0},
+            ]
+        dd_curve = drawdown_curve(equity_curve)
+        initial = equity_curve[0]["equity"] if equity_curve else 0.0
+        spy_curve = spy_benchmark_curve(
+            conn, report["start_date"], report["end_date"], initial=initial,
+        )
+        baseline_report = find_baseline_report(
+            conn, report["strategy_id"], report["start_date"], report["end_date"],
+        )
+        baseline_curve = []
+        if baseline_report:
+            try:
+                bm = _json.loads(baseline_report["metrics_json"])
+                baseline_curve = bm.get("equity_curve") or []
+            except (TypeError, _json.JSONDecodeError):
+                baseline_curve = []
+
+        # Regime breakdown — prefer stored value (computed at save time);
+        # fall back to live compute for legacy reports.
+        regimes = metrics.get("regime_breakdown")
+        if (regimes is None or (isinstance(regimes, dict) and regimes.get("available") is False)) and trades:
+            spy_bars = get_bars(conn, "SPY", "1Day",
+                                start=report["start_date"], end=report["end_date"])
+            buckets = vol_buckets_from_spy(spy_bars) if spy_bars else {}
+            tagged = tag_trades(trades, buckets)
+            regimes = regime_metrics(tagged)
+
+        # Parity verdict — pulled from metrics_json (saved at write time).
+        parity = metrics.get("parity")
+
+        # Walk-forward children list if this report has one.
+        wf_id = report["walkforward_id"] if "walkforward_id" in report.keys() else None
+        wf_children = list_walkforward_children(conn, wf_id) if wf_id else []
+        # Drop self if the parent shares its own walkforward_id (filter already in helper).
+        is_walkforward_parent = bool(params.get("walkforward")) and wf_id is not None
+
+        conn.close()
+        return render_template(
+            "backtest_detail.html",
+            report=report, metrics=metrics, trades=trades, params=params,
+            equity_curve=equity_curve, dd_curve=dd_curve,
+            spy_curve=spy_curve, baseline_curve=baseline_curve,
+            baseline_report=baseline_report,
+            regimes=regimes,
+            parity=parity,
+            wf_children=wf_children,
+            is_walkforward_parent=is_walkforward_parent,
+        )
+
+    @app.route("/strategy/<strategy_id>/backtest", methods=["POST"])
+    def strategy_backtest(strategy_id):
+        """Trigger a backtest from the strategy detail page.
+
+        Synchronous — small windows finish in seconds. Logs an event and
+        redirects to the new report's detail page on success.
+        """
+        from heron.backtest import run_strategy_backtest
+        start = request.form.get("start") or None
+        end = request.form.get("end") or None
+        seeder = request.form.get("seeder") or "synthetic"
+        if seeder not in ("synthetic", "real"):
+            seeder = "synthetic"
+        try:
+            seed = int(request.form.get("seed") or 0)
+        except ValueError:
+            seed = 0
+        try:
+            equity = float(request.form.get("equity") or 100_000.0)
+        except ValueError:
+            equity = 100_000.0
+        conn = get_conn()
+        try:
+            result = run_strategy_backtest(
+                conn, strategy_id,
+                start=start, end=end, seed=seed, initial_equity=equity,
+                save=True, seeder=seeder,
+            )
+        except ValueError as e:
+            flash(str(e), "error")
+            conn.close()
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+        log_event(
+            conn, "backtest_run",
+            f"Backtest #{result['report_id']} for {strategy_id} (seeder={seeder}): "
+            f"{result['metrics']['n_trades']} trades, "
+            f"{result['metrics']['total_return']:+.2%}",
+            severity="info", source="dashboard.backtest",
+        )
+        conn.close()
+        flash(f"Backtest #{result['report_id']} complete (seeder={seeder})", "success")
+        return redirect(url_for("backtest_detail", report_id=result["report_id"]))
+
+    @app.route("/strategy/<strategy_id>/walkforward", methods=["POST"])
+    def strategy_walkforward(strategy_id):
+        """Run a walk-forward backtest from the strategy detail page.
+
+        Synchronous; tests with small windows complete in a few seconds.
+        """
+        import json as _json
+        from heron.backtest.walkforward import run_walkforward
+        from heron.backtest.sweep import parse_axes
+        from heron.journal.strategies import get_strategy
+        start = request.form.get("start") or None
+        end = request.form.get("end") or None
+        seeder = request.form.get("seeder") or "synthetic"
+        if seeder not in ("synthetic", "real"):
+            seeder = "synthetic"
+        objective = request.form.get("objective") or "sharpe"
+        if objective not in ("sharpe", "total_return", "win_rate", "avg_trade_pnl"):
+            objective = "sharpe"
+        try:
+            train = int(request.form.get("train") or 6)
+            test = int(request.form.get("test") or 3)
+            step = int(request.form.get("step") or 3)
+            seed = int(request.form.get("seed") or 0)
+            equity = float(request.form.get("equity") or 100_000.0)
+        except ValueError:
+            flash("Invalid numeric input.", "error")
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+        if not start or not end:
+            flash("Walk-forward requires start and end dates.", "error")
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+
+        # Optional axes: textarea/input named "vary" with one spec per line
+        # ("stop_mult=1.0,1.5,2.0"). Empty/missing → no fitting.
+        vary_raw = (request.form.get("vary") or "").strip()
+        axes = None
+        conn = get_conn()
+        if vary_raw:
+            specs = [line.strip() for line in vary_raw.splitlines() if line.strip()]
+            s = get_strategy(conn, strategy_id)
+            try:
+                base_cfg = _json.loads(s["config"]) if s and s["config"] else {}
+            except (TypeError, _json.JSONDecodeError):
+                base_cfg = {}
+            try:
+                axes = parse_axes(specs, base_cfg)
+            except ValueError as e:
+                flash(f"Bad fit axes: {e}", "error")
+                conn.close()
+                return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+
+        try:
+            res = run_walkforward(
+                conn, strategy_id,
+                start=start, end=end,
+                train_months=train, test_months=test, step_months=step,
+                seed=seed, initial_equity=equity, seeder=seeder,
+                axes=axes, objective=objective,
+            )
+        except ValueError as e:
+            flash(str(e), "error")
+            conn.close()
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+        log_event(
+            conn, "backtest_walkforward",
+            f"WF {res['walkforward_id']} for {strategy_id}: "
+            f"{res['metrics']['n_windows']} windows, "
+            f"{res['metrics']['n_trades']} trades, "
+            f"{res['metrics']['total_return']:+.2%}"
+            + (f" (fit axes={axes}, obj={objective})" if axes else ""),
+            severity="info", source="dashboard.walkforward",
+        )
+        conn.close()
+        flash(
+            f"Walk-forward complete: {res['metrics']['n_windows']} windows"
+            + (" (with fitting)" if axes else "") + ".",
+            "success",
+        )
+        return redirect(url_for("backtest_detail", report_id=res["parent_report_id"]))
+
+    @app.route("/strategy/<strategy_id>/sweep", methods=["POST"])
+    def strategy_sweep(strategy_id):
+        """Cartesian param sweep posted from the strategy detail page.
+
+        Form fields: start, end, seed, equity, seeder, and one entry per axis
+        named `vary_<axis>` containing comma-separated values.
+        """
+        from heron.backtest.sweep import parse_axes, run_sweep, SWEEPABLE_AXES
+        start = request.form.get("start") or None
+        end = request.form.get("end") or None
+        seeder = request.form.get("seeder") or "synthetic"
+        if seeder not in ("synthetic", "real"):
+            seeder = "synthetic"
+        try:
+            seed = int(request.form.get("seed") or 0)
+            equity = float(request.form.get("equity") or 100_000.0)
+        except ValueError:
+            flash("Invalid numeric input.", "error")
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+        # Build axis specs from form.
+        axis_specs = []
+        for axis in SWEEPABLE_AXES:
+            raw = (request.form.get(f"vary_{axis}") or "").strip()
+            if raw:
+                axis_specs.append(f"{axis}={raw}")
+        if not axis_specs:
+            flash("Provide at least one axis to sweep.", "error")
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+
+        conn = get_conn()
+        strat = get_strategy(conn, strategy_id)
+        if not strat:
+            conn.close()
+            abort(404)
+        try:
+            base_cfg = json.loads(strat["config"]) if strat["config"] else {}
+        except (TypeError, json.JSONDecodeError):
+            base_cfg = {}
+        try:
+            axes = parse_axes(axis_specs, base_cfg)
+            res = run_sweep(conn, strategy_id, axes,
+                            start=start, end=end, seed=seed,
+                            initial_equity=equity, seeder=seeder)
+        except ValueError as e:
+            flash(str(e), "error")
+            conn.close()
+            return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+
+        log_event(
+            conn, "backtest_sweep",
+            f"Sweep {res['sweep_id']} for {strategy_id}: "
+            f"{res['n_saved']}/{res['n_combos']} combos saved",
+            severity="info", source="dashboard.sweep",
+        )
+        conn.close()
+        flash(f"Sweep complete: {res['n_saved']} combos.", "success")
+        return redirect(url_for("backtest_sweep_detail", sweep_id=res["sweep_id"]))
+
+    @app.route("/backtests/sweeps/<sweep_id>")
+    def backtest_sweep_detail(sweep_id):
+        """Render a sweep matrix: each row = one combo's report + metrics."""
+        conn = get_conn()
+        rows = conn.execute(
+            "SELECT * FROM backtest_reports WHERE sweep_id=? ORDER BY total_return DESC",
+            (sweep_id,),
+        ).fetchall()
+        if not rows:
+            conn.close()
+            abort(404)
+        reports = []
+        all_axes = set()
+        for r in rows:
+            d = dict(r)
+            try:
+                params = json.loads(d.get("params_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                params = {}
+            try:
+                metrics = json.loads(d.get("metrics_json") or "{}")
+            except (TypeError, json.JSONDecodeError):
+                metrics = {}
+            overrides = params.get("sweep_overrides", {})
+            all_axes.update(overrides.keys())
+            reports.append({
+                "report_id": d["id"],
+                "overrides": overrides,
+                "total_return": d.get("total_return"),
+                "max_drawdown": d.get("max_drawdown"),
+                "sharpe": d.get("sharpe"),
+                "n_trades": d.get("n_trades"),
+                "win_rate": d.get("win_rate"),
+                "metrics": metrics,
+            })
+        # Pick winner (best total_return). Operator can fork from there.
+        winner = reports[0] if reports else None
+        strategy_id = rows[0]["strategy_id"]
+        conn.close()
+        return render_template(
+            "backtest_sweep.html",
+            sweep_id=sweep_id,
+            strategy_id=strategy_id,
+            reports=reports,
+            axes=sorted(all_axes),
+            winner=winner,
+        )
+
+    @app.route("/backtests/sweeps/<sweep_id>/promote/<int:report_id>", methods=["POST"])
+    def backtest_sweep_promote(sweep_id, report_id):
+        """Fork the sweep winner into a new PROPOSED strategy with the override applied."""
+        from heron.journal.strategies import create_strategy
+        conn = get_conn()
+        row = conn.execute(
+            "SELECT * FROM backtest_reports WHERE id=? AND sweep_id=?",
+            (report_id, sweep_id),
+        ).fetchone()
+        if not row:
+            conn.close()
+            abort(404)
+        try:
+            params = json.loads(row["params_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            params = {}
+        overrides = params.get("sweep_overrides", {})
+        if not overrides:
+            flash("No overrides recorded; cannot fork.", "error")
+            conn.close()
+            return redirect(url_for("backtest_sweep_detail", sweep_id=sweep_id))
+
+        parent = get_strategy(conn, row["strategy_id"])
+        if not parent:
+            conn.close()
+            abort(404)
+        try:
+            base_cfg = json.loads(parent["config"]) if parent["config"] else {}
+        except (TypeError, json.JSONDecodeError):
+            base_cfg = {}
+        merged = dict(base_cfg)
+        merged.update(overrides)
+
+        # New strategy id: parent + sweep_id short tag.
+        new_id = f"{parent['id']}_swp_{sweep_id[:6]}"
+        if get_strategy(conn, new_id):
+            flash(f"Strategy {new_id} already exists.", "error")
+            conn.close()
+            return redirect(url_for("backtest_sweep_detail", sweep_id=sweep_id))
+
+        create_strategy(
+            conn,
+            id=new_id,
+            name=f"{parent['name']} (sweep #{report_id})",
+            description=f"Forked from {parent['id']} via sweep {sweep_id}.",
+            rationale="Sweep winner overrides: " + ", ".join(
+                f"{k}={v}" for k, v in overrides.items()),
+            config=merged,
+            parent_id=parent["id"],
+            template=parent["template"] if "template" in parent.keys() else None,
+        )
+        log_event(
+            conn, "strategy_forked",
+            f"Forked {new_id} from {parent['id']} via sweep {sweep_id} report #{report_id}",
+            severity="info", source="dashboard.sweep",
+        )
+        conn.close()
+        flash(f"Forked {new_id} as PROPOSED.", "success")
+        return redirect(url_for("strategy_detail", strategy_id=new_id))
+
+
+    @app.route("/data/earnings", methods=["GET"])
+    def data_earnings_page():
+        """Earnings calendar cache: list, fetch, configure."""
+        from heron.data.earnings import get_earnings_events
+        from heron.data.cache import get_conn as get_cache_conn, init_db as init_cache_db
+        from heron.config import WATCHLIST, FINNHUB_API_KEY
+
+        cache_conn = get_cache_conn()
+        init_cache_db(cache_conn)
+        try:
+            args = request.args
+            start = args.get("start") or None
+            end = args.get("end") or None
+            ticker = (args.get("ticker") or "").upper().strip() or None
+            min_surp = args.get("min_surprise", "").strip()
+            try:
+                min_surp_val = float(min_surp) if min_surp else None
+            except ValueError:
+                min_surp_val = None
+            rows = get_earnings_events(
+                cache_conn,
+                start=start, end=end,
+                tickers=[ticker] if ticker else None,
+                min_abs_surprise=min_surp_val,
+            )
+            stats = {
+                "total": len(rows),
+                "with_surprise": sum(1 for r in rows if r.get("surprise_pct") is not None),
+                "tickers": len({r["ticker"] for r in rows}),
+            }
+        finally:
+            cache_conn.close()
+
+        return render_template(
+            "data_earnings.html",
+            rows=rows[:500],
+            row_count=len(rows),
+            truncated=len(rows) > 500,
+            stats=stats,
+            watchlist=WATCHLIST,
+            has_api_key=bool(FINNHUB_API_KEY),
+            filters={"start": start or "", "end": end or "",
+                     "ticker": ticker or "", "min_surprise": min_surp},
+            active_path="/data/earnings",
+        )
+
+    @app.route("/data/earnings/fetch", methods=["POST"])
+    def data_earnings_fetch_route():
+        """Trigger Finnhub fetch for [start, end] across the configured universe."""
+        from heron.data.earnings import fetch_and_cache
+        from heron.data.cache import get_conn as get_cache_conn, init_db as init_cache_db
+        from heron.config import WATCHLIST
+
+        start = request.form.get("start", "").strip()
+        end = request.form.get("end", "").strip()
+        universe_raw = request.form.get("universe", "").strip()
+        if not start or not end:
+            flash("start and end are required (YYYY-MM-DD).", "error")
+            return redirect(url_for("data_earnings_page"))
+        universe = (
+            [t.strip().upper() for t in universe_raw.split(",") if t.strip()]
+            if universe_raw else list(WATCHLIST)
+        )
+        cache_conn = get_cache_conn()
+        init_cache_db(cache_conn)
+        try:
+            n = fetch_and_cache(cache_conn, start, end, universe=universe)
+        except RuntimeError as e:
+            flash(str(e), "error")
+            cache_conn.close()
+            return redirect(url_for("data_earnings_page"))
+        finally:
+            cache_conn.close()
+
+        # Log to journal so the action is visible in History.
+        conn = get_conn()
+        log_event(
+            conn, "earnings_fetched",
+            f"Cached {n} earnings events {start} → {end} for {len(universe)} tickers",
+            severity="info", source="dashboard.data.earnings",
+        )
+        conn.close()
+        flash(f"Cached {n} earnings events.", "success")
+        return redirect(url_for("data_earnings_page",
+                                start=start, end=end))
+
+    @app.route("/data/universe", methods=["GET"])
+    def data_universe_page():
+        """Point-in-time universe snapshots — record + browse."""
+        from heron.data.cache import get_conn as get_cache_conn, init_db as init_cache_db
+
+        cache_conn = get_cache_conn()
+        init_cache_db(cache_conn)
+        try:
+            dates = cache_conn.execute(
+                "SELECT snapshot_date, COUNT(*) AS n, MAX(created_at) AS created_at "
+                "FROM universe_snapshots GROUP BY snapshot_date ORDER BY snapshot_date DESC LIMIT 50"
+            ).fetchall()
+            snapshots = []
+            for d in dates:
+                tickers = [r[0] for r in cache_conn.execute(
+                    "SELECT ticker FROM universe_snapshots WHERE snapshot_date=? ORDER BY ticker",
+                    (d["snapshot_date"],),
+                ).fetchall()]
+                snapshots.append({
+                    "snapshot_date": d["snapshot_date"],
+                    "n": d["n"],
+                    "created_at": d["created_at"],
+                    "tickers": tickers,
+                })
+        finally:
+            cache_conn.close()
+        return render_template("data_universe.html", snapshots=snapshots,
+                               active_path="/data/universe")
+
+    @app.route("/data/universe/snapshot", methods=["POST"])
+    def data_universe_snapshot_route():
+        """Record a new universe snapshot."""
+        from heron.data.cache import get_conn as get_cache_conn, init_db as init_cache_db
+        from heron.util import utc_now_iso
+
+        snap_date = request.form.get("snapshot_date", "").strip()
+        tickers_raw = request.form.get("tickers", "").strip()
+        note = request.form.get("note", "").strip() or None
+        if not snap_date or not tickers_raw:
+            flash("snapshot_date and tickers are required.", "error")
+            return redirect(url_for("data_universe_page"))
+        syms = sorted({t.strip().upper() for t in tickers_raw.split(",") if t.strip()})
+        if not syms:
+            flash("No tickers parsed.", "error")
+            return redirect(url_for("data_universe_page"))
+        now = utc_now_iso()
+        cache_conn = get_cache_conn()
+        init_cache_db(cache_conn)
+        try:
+            cache_conn.executemany(
+                """INSERT OR REPLACE INTO universe_snapshots
+                   (snapshot_date, ticker, source, note, created_at)
+                   VALUES (?, ?, 'manual', ?, ?)""",
+                [(snap_date, t, note, now) for t in syms],
+            )
+            cache_conn.commit()
+        finally:
+            cache_conn.close()
+        conn = get_conn()
+        log_event(conn, "universe_snapshot",
+                  f"Recorded {len(syms)} tickers as universe at {snap_date}",
+                  severity="info", source="dashboard.data.universe")
+        conn.close()
+        flash(f"Stored {len(syms)} tickers for {snap_date}.", "success")
+        return redirect(url_for("data_universe_page"))
 
     @app.route("/costs")
     def costs_view():
@@ -476,7 +1271,7 @@ def create_app():
 
     @app.route("/resilience")
     def resilience_view():
-        """Resilience (M15) — startup audits, shutdowns, secrets hygiene."""
+        """Resilience + Health — startup audits, shutdowns, secrets, costs, exposure."""
         import json as _json
         from heron.resilience import check_secrets_hygiene
         conn = get_conn()
@@ -500,10 +1295,19 @@ def create_app():
         startups = [_parse(r) for r in startup_rows]
         shutdowns = [_parse(r) for r in shutdown_rows]
         secrets = check_secrets_hygiene()
+        # Health section: exposure + cost panels.
+        events = get_events(conn, limit=50)
+        month_cost = get_monthly_cost(conn)
+        daily = get_daily_costs(conn)
+        wash = get_wash_sale_exposure(conn, mode="live")
+        pdt = get_pdt_count(conn, mode="live")
         conn.close()
         return render_template("resilience.html",
                                startups=startups, shutdowns=shutdowns,
-                               secrets=secrets)
+                               secrets=secrets,
+                               events=events, month_cost=month_cost,
+                               daily_costs=daily, wash_lots=wash,
+                               pdt_count=pdt)
 
     @app.route("/strategy/<strategy_id>/approve", methods=["POST"])
     def approve_strategy(strategy_id):
@@ -540,10 +1344,19 @@ def create_app():
     def promote_strategy(strategy_id):
         """Promote a PAPER strategy → LIVE.
 
-        Blocked unless this month's review is filed (Project-HERON.md §11).
+        Two gates (Project-HERON.md §11 + parity invariant):
+          1. Monthly review must be filed.
+          2. Latest backtest report must show a passing parity verdict.
+             Operator can bypass via `force=1` (logged as `promotion_force`).
         """
+        from heron.backtest.parity import get_latest_backtest_parity
+        from heron.journal.strategies import get_strategy
+
         conn = get_conn()
         reason = request.form.get("reason", "Operator promoted to live")
+        force = request.form.get("force") in ("1", "true", "on")
+        strat = get_strategy(conn, strategy_id)
+        going_live = bool(strat) and (strat["state"] == "PAPER")
         if not is_review_current(conn):
             log_event(conn, "promotion_blocked",
                       f"Promotion of {strategy_id} blocked: monthly review not filed",
@@ -551,6 +1364,28 @@ def create_app():
             flash("Promotion blocked — file this month's review first.", "error")
             conn.close()
             return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+        if going_live and not force:
+            parity = get_latest_backtest_parity(conn, strategy_id)
+            if not parity or not parity.get("available"):
+                log_event(conn, "promotion_blocked",
+                          f"Promotion of {strategy_id} blocked: no parity verdict on latest backtest",
+                          severity="warn", source="dashboard.promote")
+                flash("Promotion blocked — run a baseline + reparity the latest backtest first.", "error")
+                conn.close()
+                return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+            if not parity.get("passes"):
+                log_event(conn, "promotion_blocked",
+                          f"Promotion of {strategy_id} blocked: parity FAIL "
+                          f"(CI [{parity.get('ci_lower')}, {parity.get('ci_upper')}], "
+                          f"report #{parity.get('report_id')})",
+                          severity="warn", source="dashboard.promote")
+                flash("Promotion blocked — latest backtest does not beat baseline.", "error")
+                conn.close()
+                return redirect(url_for("strategy_detail", strategy_id=strategy_id))
+        if going_live and force:
+            log_event(conn, "promotion_force",
+                      f"Operator force-promoted {strategy_id} (parity gate bypassed)",
+                      severity="warn", source="dashboard.promote")
         try:
             transition_strategy(conn, strategy_id, "LIVE",
                                 reason=reason, operator="operator")
@@ -744,10 +1579,18 @@ def create_app():
         except (KeyError, ValueError) as e:
             return render_template("_preview.html", config=None, error=str(e))
 
-    # ── Scheduler ──────────────────────────────────────────────────────────
+    # ── Actions (formerly Scheduler) ───────────────────────────────────────
 
     @app.route("/scheduler")
     def scheduler_view():
+        """Back-compat redirect; canonical is /actions."""
+        return redirect(url_for("actions_view"), code=301)
+
+    @app.route("/actions")
+    def actions_view():
+        """Operator action surface: Immediate / Scheduled / History."""
+        from heron.runtime.supervisor import DEFAULT_JOBS
+
         conn = get_conn()
         recent = conn.execute(
             "SELECT * FROM scheduler_runs ORDER BY started_at DESC LIMIT 50"
@@ -755,12 +1598,103 @@ def create_app():
         commands = conn.execute(
             "SELECT * FROM scheduler_commands ORDER BY id DESC LIMIT 20"
         ).fetchall()
-        # Static job catalog (the supervisor process owns the live schedule)
-        from heron.runtime.supervisor import DEFAULT_JOBS
+
+        # History filters from query string.
+        args = request.args
+        event_type_filter = args.get("event_type") or None
+        severity_filter = args.get("severity") or None
+        kind = args.get("kind") or "all"  # all | jobs | events
+        try:
+            limit = max(10, min(int(args.get("limit") or 100), 500))
+        except ValueError:
+            limit = 100
+
+        events_rows = []
+        if kind in ("all", "events"):
+            events_rows = get_events(conn,
+                                     event_type=event_type_filter,
+                                     severity=severity_filter,
+                                     limit=limit)
+        runs_rows = []
+        if kind in ("all", "jobs"):
+            sql = "SELECT * FROM scheduler_runs"
+            params = []
+            if severity_filter == "error":
+                sql += " WHERE status='error'"
+            elif severity_filter and severity_filter != "all":
+                sql += " WHERE status=?"
+                params.append(severity_filter)
+            sql += " ORDER BY started_at DESC LIMIT ?"
+            params.append(limit)
+            runs_rows = conn.execute(sql, params).fetchall()
+
+        # Merge into one sorted list of dicts.
+        history = []
+        for e in events_rows:
+            d = dict(e)
+            history.append({
+                "ts": d["created_at"],
+                "kind": "event",
+                "type": d["event_type"],
+                "severity": d.get("severity") or "info",
+                "source": d.get("source") or "",
+                "message": d.get("message") or "",
+            })
+        for r in runs_rows:
+            d = dict(r)
+            history.append({
+                "ts": d["started_at"],
+                "kind": "job",
+                "type": d["job_id"],
+                "severity": "error" if d.get("status") == "error" else "info",
+                "source": "supervisor",
+                "message": (d.get("result_summary") or d.get("error") or
+                            f"status={d.get('status')}"),
+            })
+        history.sort(key=lambda x: x["ts"] or "", reverse=True)
+        history = history[:limit]
+
+        # Distinct event types for filter dropdown.
+        type_rows = conn.execute(
+            "SELECT DISTINCT event_type FROM events ORDER BY event_type"
+        ).fetchall()
+        known_event_types = [r["event_type"] for r in type_rows]
+
         jobs = [{"id": jid, "name": desc} for jid, _fn, _trig, desc in DEFAULT_JOBS]
+        # Immediate-action shortcuts: subset of jobs the operator runs ad-hoc.
+        immediate_actions = [
+            {"job_id": "executor_cycle",
+             "label": "Run executor cycle",
+             "hint": "Process pending candidates + reconcile open positions."},
+            {"job_id": "research_premarket",
+             "label": "Run premarket research",
+             "hint": "News scan + LLM classification + candidate generation."},
+            {"job_id": "eod_debrief",
+             "label": "Run EOD debrief",
+             "hint": "Daily summary, journal flush, Discord alert."},
+            {"job_id": "daily_health",
+             "label": "Run health check",
+             "hint": "Resilience checks, secret rotation, SLO probes."},
+            {"job_id": "heartbeat",
+             "label": "Send heartbeat",
+             "hint": "Manual heartbeat ping (normally hourly)."},
+        ]
+        # Filter to jobs that exist.
+        valid_ids = {j["id"] for j in jobs}
+        immediate_actions = [a for a in immediate_actions if a["job_id"] in valid_ids]
+
         conn.close()
-        return render_template("scheduler.html",
-                               jobs=jobs, recent=recent, commands=commands)
+        return render_template(
+            "actions.html",
+            jobs=jobs, recent=recent, commands=commands,
+            history=history,
+            immediate_actions=immediate_actions,
+            known_event_types=known_event_types,
+            filter_event_type=event_type_filter,
+            filter_severity=severity_filter,
+            filter_kind=kind,
+            filter_limit=limit,
+        )
 
     @app.route("/scheduler/<job_id>/<action>", methods=["POST"])
     def scheduler_command(job_id, action):
@@ -768,10 +1702,20 @@ def create_app():
         conn = get_conn()
         try:
             request_command(conn, job_id, action)
+            log_event(
+                conn, "operator_action",
+                f"Queued {action} for {job_id}",
+                severity="info", source="dashboard.actions",
+            )
             flash(f"Queued {action} for {job_id}.", "success")
         except ValueError as e:
             flash(str(e), "error")
         conn.close()
-        return redirect(url_for("scheduler_view"))
+        return redirect(url_for("actions_view"))
+
+    @app.route("/actions/<job_id>/<action>", methods=["POST"])
+    def actions_command(job_id, action):
+        """Canonical action endpoint — same impl as the legacy /scheduler one."""
+        return scheduler_command(job_id, action)
 
     return app

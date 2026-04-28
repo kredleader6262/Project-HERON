@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <h1 class="text-2xl font-bold">Contamination audit</h1>
+  <span class="dim text-sm">Static AST scan for point-in-time leaks in strategy code.</span>
+</div>
+
+<div class="card p-4 mb-4">
+  <form method="get" class="flex items-end gap-3">
+    <label class="text-xs flex-1">Path
+      <input type="text" name="path" value="{{ target }}"
+             class="block w-full mt-1 px-2 py-1 mono"
+             style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+    </label>
+    <button type="submit" class="btn btn-brand">Scan</button>
+  </form>
+  <div class="text-xs dim mt-2">
+    Default: <code class="mono">heron/strategy</code>. CLI mirror:
+    <code class="mono">heron audit contamination [path]</code>.
+  </div>
+</div>
+
+{% if not findings %}
+  <div class="card p-4" style="border-left: 3px solid var(--ok, #16a34a);">
+    <div class="section-title" style="color: #16a34a;">✓ Clean</div>
+    <div class="text-sm">No contamination findings in <code class="mono">{{ target }}</code>.</div>
+  </div>
+{% else %}
+  <div class="card p-4 mb-3" style="border-left: 3px solid var(--err, #dc2626);">
+    <div class="section-title" style="color: #dc2626;">⚠ {{ findings|length }} finding(s)</div>
+    <div class="text-sm">Each finding is a callsite reading time-sensitive data without an
+      <code class="mono">as_of=</code> kwarg. Either pass through the backtest's PIT cutoff
+      or restrict the call to operator-facing surfaces.</div>
+  </div>
+  <table class="htable">
+    <thead><tr><th>File</th><th class="r">Line</th><th>Rule</th><th>Severity</th><th>Message</th></tr></thead>
+    <tbody>
+      {% for f in findings %}
+      <tr>
+        <td class="mono text-xs">{{ f.file }}</td>
+        <td class="r num">{{ f.line }}</td>
+        <td class="mono text-xs">{{ f.rule }}</td>
+        <td class="mono text-xs">{{ f.severity }}</td>
+        <td class="text-xs">{{ f.message }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

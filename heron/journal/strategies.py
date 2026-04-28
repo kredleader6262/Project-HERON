@@ -97,3 +97,23 @@ def get_state_history(conn, strategy_id):
         "SELECT * FROM strategy_state_log WHERE strategy_id=? ORDER BY ts",
         (strategy_id,),
     ).fetchall()
+
+
+def set_strategy_tags(conn, id, tags):
+    """Set the `tags` column (JSON list) on a strategy. Pass [] to clear."""
+    payload = json.dumps(list(tags)) if tags else None
+    conn.execute("UPDATE strategies SET tags=?, updated_at=? WHERE id=?",
+                 (payload, _now(), id))
+    conn.commit()
+
+
+def get_strategy_tags(conn, id):
+    """Return list of tags for a strategy, or [] if none / row missing."""
+    row = conn.execute("SELECT tags FROM strategies WHERE id=?", (id,)).fetchone()
+    if not row or not row["tags"]:
+        return []
+    try:
+        v = json.loads(row["tags"])
+        return [str(t) for t in v] if isinstance(v, list) else []
+    except (ValueError, TypeError):
+        return []

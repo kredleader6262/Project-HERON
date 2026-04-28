@@ -1,0 +1,17 @@
+<div class="card decision-card" data-kind="contamination">
+  <div class="card-head">
+    <span class="micro" style="color:var(--err);">Contamination · {{ f.severity or 'warn' }}</span>
+    <h3>{{ f.rule }}</h3>
+  </div>
+  <div class="card-body">
+    <div class="mono dim" style="font-size:0.72rem;">
+      {{ f.file }}:{{ f.line }}
+    </div>
+    {% if f.message %}
+    <div class="muted" style="font-size:0.78rem; margin-top:0.3rem;">{{ f.message }}</div>
+    {% endif %}
+  </div>
+  <div class="card-actions">
+    <a class="link" href="/audits/contamination">Audit panel →</a>
+  </div>
+</div>

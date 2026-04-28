@@ -1,0 +1,26 @@
+<div class="card decision-card" data-kind="candidate">
+  <div class="card-head">
+    <span class="micro">Candidate · {{ c.strategy_id }}</span>
+    <h3>{{ c.ticker }} <span class="dim mono">{{ c.side }}</span></h3>
+  </div>
+  <div class="card-body">
+    <div class="dim mono" style="font-size:0.72rem;">
+      score={{ '%.2f' % (c.score or 0) }}
+      {% if c.event_ts %} · event={{ c.event_ts[:10] }}{% endif %}
+    </div>
+    <div class="muted" style="font-size:0.78rem; margin-top:0.4rem;">
+      {% if c.thesis %}{{ c.thesis[:140] }}{% if c.thesis|length > 140 %}…{% endif %}{% else %}—{% endif %}
+    </div>
+  </div>
+  <div class="card-actions">
+    <form method="POST" action="/candidate/{{ c.id }}/accept" style="display:inline;">
+      <button class="btn btn-primary" type="submit">Accept</button>
+    </form>
+    <form method="POST" action="/candidate/{{ c.id }}/reject" style="display:inline;"
+          onsubmit="return confirm('Reject {{ c.ticker }}?');">
+      <input type="hidden" name="reason" value="Rejected via Mission Control">
+      <button class="btn" type="submit">Reject</button>
+    </form>
+    <a class="link" href="/candidate/{{ c.id }}">Details →</a>
+  </div>
+</div>

@@ -243,13 +243,31 @@ class TestDashboardApproval:
         create_review(journal_conn, ym)
         file_review(journal_conn, ym, "ok", "go")
 
+        # Parity gate: no backtest report → must force-bypass to promote.
         resp = client.post("/strategy/test_v1/promote",
-                           data={"reason": "Beat test passed"},
+                           data={"reason": "Beat test passed", "force": "1"},
                            follow_redirects=True)
         assert resp.status_code == 200
 
         s = get_strategy(journal_conn, "test_v1")
         assert s["state"] == "LIVE"
+
+    def test_promote_strategy_blocked_without_parity(self, client, journal_conn):
+        """PAPER→LIVE without a passing backtest parity verdict is blocked."""
+        from heron.journal.ops import create_review, file_review
+        from datetime import datetime, timezone
+        create_strategy(journal_conn, "test_v1", "Test")
+        transition_strategy(journal_conn, "test_v1", "PAPER")
+        ym = datetime.now(timezone.utc).strftime("%Y-%m")
+        create_review(journal_conn, ym)
+        file_review(journal_conn, ym, "ok", "go")
+
+        resp = client.post("/strategy/test_v1/promote",
+                           data={"reason": "no parity"},
+                           follow_redirects=True)
+        assert resp.status_code == 200
+        s = get_strategy(journal_conn, "test_v1")
+        assert s["state"] == "PAPER"
 
     def test_promote_strategy_blocked_without_review(self, client, journal_conn):
         """Promotion must be blocked if this month's review isn't filed."""

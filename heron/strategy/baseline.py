@@ -152,49 +152,11 @@ def get_paired_daily_returns(conn, llm_strategy_id, start_date=None, end_date=No
 
 
 def bootstrap_beat_test(diffs, n_bootstrap=10000, ci=0.95, rng=None):
-    """Paired bootstrap test per Section 10.2.
-
-    diffs: list of daily return differences (d_i = r_LLM,i - r_baseline,i)
-    Returns {"passes": bool, "ci_lower": float, "ci_upper": float, "mean_diff": float,
-             "n_days": int, "n_bootstrap": int}
+    """Paired bootstrap test per Section 10.2. Re-exports
+    `heron.backtest.significance.bootstrap_beat_test`.
     """
-    import random as _random
-    if rng is None:
-        rng = _random.Random()
-
-    n = len(diffs)
-    if n < 5:
-        return {
-            "passes": False, "ci_lower": 0.0, "ci_upper": 0.0,
-            "mean_diff": 0.0, "n_days": n, "n_bootstrap": n_bootstrap,
-            "reason": f"Insufficient data: {n} days (need ≥ 5)",
-        }
-
-    # Bootstrap
-    means = []
-    for _ in range(n_bootstrap):
-        sample = [diffs[rng.randint(0, n - 1)] for _ in range(n)]
-        means.append(sum(sample) / n)
-
-    means.sort()
-    alpha = (1 - ci) / 2
-    lo_idx = int(alpha * n_bootstrap)
-    hi_idx = int((1 - alpha) * n_bootstrap) - 1
-
-    ci_lower = means[lo_idx]
-    ci_upper = means[hi_idx]
-    mean_diff = sum(diffs) / n
-
-    passes = ci_lower > 0  # Entire CI above zero
-
-    return {
-        "passes": passes,
-        "ci_lower": round(ci_lower, 6),
-        "ci_upper": round(ci_upper, 6),
-        "mean_diff": round(mean_diff, 6),
-        "n_days": n,
-        "n_bootstrap": n_bootstrap,
-    }
+    from heron.backtest.significance import bootstrap_beat_test as _impl
+    return _impl(diffs, n_bootstrap=n_bootstrap, ci=ci, rng=rng)
 
 
 def run_beat_test(conn, llm_strategy_id, start_date=None, end_date=None, n_bootstrap=10000):

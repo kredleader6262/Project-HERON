@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Actions — HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Actions</h1>
+    <p class="lede">Operator surface for triggering, scheduling, and reviewing background work. Run <code class="mono">heron run</code> in a separate process; queued commands are picked up within ~10s.</p>
+  </div>
+</div>
+
+{# ── Immediate ───────────────────────────────────────────────── #}
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head"><div class="section-title">Immediate</div>
+    <div class="dim text-xs">One-click triggers for the most common operator pokes.</div>
+  </div>
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
+    {% for a in immediate_actions %}
+      <div class="card p-3" style="background: var(--surface-2);">
+        <div class="font-semibold text-sm">{{ a.label }}</div>
+        <div class="dim text-xs mt-1">{{ a.hint }}</div>
+        <form method="post" action="/actions/{{ a.job_id }}/run_now" class="mt-2">
+          <button class="btn btn-brand" type="submit">Run now</button>
+          <span class="dim text-xs mono ml-2">{{ a.job_id }}</span>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{# ── Scheduled ───────────────────────────────────────────────── #}
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head"><div class="section-title">Scheduled jobs</div></div>
+  <table class="htable">
+    <thead><tr><th>ID</th><th>Description</th><th class="r">Actions</th></tr></thead>
+    <tbody>
+    {% for j in jobs %}
+      <tr>
+        <td class="mono">{{ j.id }}</td>
+        <td>{{ j.name }}</td>
+        <td class="r">
+          <form method="post" action="/actions/{{ j.id }}/run_now" style="display:inline;">
+            <button class="btn btn-primary" type="submit">Run now</button></form>
+          <form method="post" action="/actions/{{ j.id }}/pause" style="display:inline;">
+            <button class="btn" type="submit">Pause</button></form>
+          <form method="post" action="/actions/{{ j.id }}/resume" style="display:inline;">
+            <button class="btn" type="submit">Resume</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if commands %}
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head"><div class="section-title">Pending commands</div></div>
+  <table class="htable">
+    <thead><tr><th>When</th><th>Job</th><th>Action</th><th>Status</th><th>Error</th></tr></thead>
+    <tbody>
+    {% for c in commands %}
+      <tr>
+        <td class="dim mono">{{ c.requested_at[:19] }}</td>
+        <td class="mono">{{ c.job_id }}</td>
+        <td>{{ c.action }}</td>
+        <td><span class="pill">{{ c.status }}</span></td>
+        <td class="dim mono">{{ c.error or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# ── History ─────────────────────────────────────────────────── #}
+<div class="card overflow-hidden">
+  <div class="card-head"><div class="section-title">History</div>
+    <div class="dim text-xs">Unified feed: scheduler runs + journal events.</div>
+  </div>
+  <form method="get" class="grid grid-cols-2 md:grid-cols-5 gap-3 p-3 items-end" style="border-bottom: 1px solid var(--line);">
+    <label class="text-xs">Kind
+      <select name="kind" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+        <option value="all" {% if filter_kind == "all" %}selected{% endif %}>all</option>
+        <option value="jobs" {% if filter_kind == "jobs" %}selected{% endif %}>jobs only</option>
+        <option value="events" {% if filter_kind == "events" %}selected{% endif %}>events only</option>
+      </select>
+    </label>
+    <label class="text-xs">Event type
+      <select name="event_type" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+        <option value="">— any —</option>
+        {% for et in known_event_types %}
+        <option value="{{ et }}" {% if filter_event_type == et %}selected{% endif %}>{{ et }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-xs">Severity
+      <select name="severity" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+        <option value="">— any —</option>
+        {% for s in ["info", "warn", "error", "ok"] %}
+        <option value="{{ s }}" {% if filter_severity == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="text-xs">Limit
+      <input type="number" name="limit" value="{{ filter_limit }}" min="10" max="500" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+    </label>
+    <div class="flex gap-2">
+      <button type="submit" class="btn btn-brand">Filter</button>
+      <a href="/actions" class="btn">Reset</a>
+    </div>
+  </form>
+  {% if history %}
+  <table class="htable">
+    <thead><tr><th>When</th><th>Kind</th><th>Type</th><th>Severity</th><th>Source</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for h in history %}
+      <tr>
+        <td class="dim mono">{{ h.ts[:19] if h.ts else "" }}</td>
+        <td><span class="pill {% if h.kind == 'job' %}pill-info{% else %}pill-brand{% endif %}">{{ h.kind }}</span></td>
+        <td class="mono">{{ h.type }}</td>
+        <td><span class="pill {% if h.severity == 'error' %}pill-err{% elif h.severity == 'warn' %}pill-warn{% elif h.severity == 'ok' %}pill-ok{% endif %}">{{ h.severity }}</span></td>
+        <td class="dim mono text-xs">{{ h.source }}</td>
+        <td class="dim" style="max-width:560px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{{ h.message }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No history yet</div>
+    <div class="empty-hint">Trigger an action above or start the supervisor with <code class="mono">heron run</code>.</div></div>
+  {% endif %}
+</div>
+{% endblock %}

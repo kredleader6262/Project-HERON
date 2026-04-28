@@ -25,6 +25,114 @@
 </div>
 {% endif %}
 
+<details class="card p-4 mb-6">
+  <summary class="cursor-pointer font-semibold text-sm flex items-center gap-2" style="color: var(--fg-muted);">
+    <span>Run a backtest</span>
+    <span class="dim text-xs">deterministic replay against cached bars</span>
+  </summary>
+  <form action="/strategy/{{ strategy.id }}/backtest" method="post" class="grid grid-cols-2 md:grid-cols-6 gap-3 mt-3 items-end">
+    <label class="text-xs">Start <input type="date" name="start" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">End <input type="date" name="end" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Seed <input type="number" name="seed" value="0" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Initial $ <input type="number" name="equity" value="100000" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Seeder
+      <select name="seeder" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+        <option value="synthetic">synthetic (bars)</option>
+        <option value="real">real (Finnhub cache)</option>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-brand">Run backtest</button>
+  </form>
+  <div class="text-xs dim mt-2">Empty dates = full cached window. Saves a report and redirects to it. <code class="mono">real</code> requires <code class="mono">/data/earnings</code> fetch first.</div>
+</details>
+
+<details class="card p-4 mb-6">
+  <summary class="cursor-pointer font-semibold text-sm flex items-center gap-2" style="color: var(--fg-muted);">
+    <span>Walk-forward backtest</span>
+    <span class="dim text-xs">slide test windows for promotion-grade evidence</span>
+  </summary>
+  <form action="/strategy/{{ strategy.id }}/walkforward" method="post" class="grid grid-cols-2 md:grid-cols-7 gap-3 mt-3 items-end">
+    <label class="text-xs">Start <input type="date" name="start" required class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">End <input type="date" name="end" required class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Train (mo) <input type="number" name="train" value="6" min="0" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Test (mo) <input type="number" name="test" value="3" min="1" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Step (mo) <input type="number" name="step" value="3" min="1" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+    <label class="text-xs">Seeder
+      <select name="seeder" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+        <option value="synthetic">synthetic</option>
+        <option value="real">real</option>
+      </select>
+    </label>
+    <button type="submit" class="btn btn-brand">Run walk-forward</button>
+    <label class="text-xs md:col-span-5">Fit axes (optional, one per line)
+      <textarea name="vary" rows="3" placeholder="stop_mult=1.5,2.0,2.5&#10;target_mult=2.5,3.0,3.5"
+        class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></textarea>
+    </label>
+    <label class="text-xs md:col-span-2">Objective
+      <select name="objective" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+        <option value="sharpe">sharpe</option>
+        <option value="total_return">total_return</option>
+        <option value="win_rate">win_rate</option>
+        <option value="avg_trade_pnl">avg_trade_pnl</option>
+      </select>
+    </label>
+  </form>
+  <div class="text-xs dim mt-2">When fit axes are provided, each train window picks the winning combo (by objective) and locks it for the next test window. Empty axes = config frozen across all windows.</div>
+</details>
+
+<details class="card p-4 mb-6">
+  <summary class="cursor-pointer font-semibold text-sm flex items-center gap-2" style="color: var(--fg-muted);">
+    <span>Param sweep</span>
+    <span class="dim text-xs">grid-search tunable axes; pick a winner to fork</span>
+  </summary>
+  {% if not sweep_options %}
+    <div class="text-xs dim mt-3">No sweepable parameters present in this strategy's config.</div>
+  {% else %}
+  <form action="/strategy/{{ strategy.id }}/sweep" method="post" class="mt-3 space-y-3">
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-3 items-end">
+      <label class="text-xs">Start <input type="date" name="start" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+      <label class="text-xs">End <input type="date" name="end" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+      <label class="text-xs">Seed <input type="number" name="seed" value="0" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+      <label class="text-xs">Equity <input type="number" name="equity" step="0.01" value="100000" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);"></label>
+      <label class="text-xs">Seeder
+        <select name="seeder" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+          <option value="synthetic">synthetic</option>
+          <option value="real">real</option>
+        </select>
+      </label>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {% for axis in sweep_options %}
+      <label class="text-xs">
+        <span class="mono">{{ axis }}</span>
+        <span class="dim">(current: {{ strategy_config[axis] }})</span>
+        <input type="text" name="vary_{{ axis }}" placeholder="e.g. 1.0,1.5,2.0" class="block w-full mt-1 px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+      </label>
+      {% endfor %}
+    </div>
+    <button type="submit" class="btn btn-brand">Run sweep</button>
+    <div class="text-xs dim">Comma-separate values for any axis you want to vary. Empty fields are skipped. Cap is 50 combos total.</div>
+  </form>
+  {% endif %}
+  {% if sweeps %}
+  <div class="section-title mt-4">Recent sweeps</div>
+  <table class="htable">
+    <thead><tr><th>ID</th><th class="r">Combos</th><th class="r">Best return</th><th>Started</th><th></th></tr></thead>
+    <tbody>
+    {% for s in sweeps %}
+      <tr>
+        <td class="mono">{{ s.sweep_id }}</td>
+        <td class="r num">{{ s.n }}</td>
+        <td class="r num {% if s.best_return and s.best_return > 0 %}pnl-pos{% elif s.best_return and s.best_return < 0 %}pnl-neg{% endif %}">{{ "%+.2f"|format((s.best_return or 0) * 100) }}%</td>
+        <td class="dim mono">{{ s.started_at[:19] if s.started_at else "" }}</td>
+        <td><a class="btn btn-secondary" href="/backtests/sweeps/{{ s.sweep_id }}">View matrix</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</details>
+
 <div class="section-title">State history</div>
 <div class="card overflow-hidden mb-6">
   {% if history %}

@@ -38,6 +38,383 @@
   </div>
 </div>
 
+<div class="section-title flex items-center justify-between">
+  <span>Equity curve</span>
+  <span class="dim text-xs">
+    <span style="color: var(--info);">●</span> strategy
+    {% if baseline_curve %}· <span style="color: #a78bfa;">●</span> baseline{% endif %}
+    {% if spy_curve %}· <span style="color: var(--fg-muted);">●</span> SPY{% endif %}
+    · <span style="color: var(--ok);">▲</span> entry
+    · <span style="color: var(--ok);">●</span> target
+    · <span style="color: var(--err);">✕</span> stop
+    · <span style="color: var(--warn);">⏰</span> time
+  </span>
+</div>
+<div class="card p-4 mb-3">
+  <div style="position: relative; height: 320px;">
+    <canvas id="equity-chart"></canvas>
+  </div>
+  {% if not baseline_curve %}
+  <div class="text-xs dim mt-2">
+    No baseline backtest covers this exact window. Run one for
+    <code class="mono">{{ report.strategy_id }}_baseline</code> with the same dates to overlay.
+  </div>
+  {% endif %}
+</div>
+
+{% if parity %}
+<div class="section-title">Parity vs baseline</div>
+<div class="card p-4 mb-6">
+  {% if not parity.available %}
+    <div class="text-sm dim">No parity verdict — {{ parity.reason or "baseline missing" }}.
+      {% if not baseline_curve %}Run a baseline backtest with the same window, then
+      <code class="mono">heron backtest reparity --report-id {{ report.id }}</code>.{% endif %}
+    </div>
+  {% else %}
+    <div class="flex items-center gap-3 mb-2">
+      {% if parity.passes %}
+        <span class="pill" style="background:#16a34a22; color:#22c55e;">PASS · CI &gt; 0</span>
+      {% else %}
+        <span class="pill" style="background:#dc262622; color:#ef4444;">FAIL · CI includes 0</span>
+      {% endif %}
+      <span class="text-xs dim">{{ parity.n_days }} paired days · n_bootstrap={{ parity.n_bootstrap }}</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-2">
+      <div><div class="text-xs dim">Mean daily diff</div><div class="mono">{{ "%+.4f"|format(parity.mean_diff) }}</div></div>
+      <div><div class="text-xs dim">CI lower</div><div class="mono">{{ "%+.4f"|format(parity.ci_lower) }}</div></div>
+      <div><div class="text-xs dim">CI upper</div><div class="mono">{{ "%+.4f"|format(parity.ci_upper) }}</div></div>
+      <div><div class="text-xs dim">Baseline report</div>
+        <div class="mono">{% if parity.baseline_report_id %}<a class="link" href="/backtests/{{ parity.baseline_report_id }}">#{{ parity.baseline_report_id }}</a>{% else %}—{% endif %}</div>
+      </div>
+    </div>
+    {% if parity.reason %}<div class="text-xs dim mt-2">{{ parity.reason }}</div>{% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="section-title">Drawdown</div>
+<div class="card p-4 mb-6">
+  <div style="position: relative; height: 160px;">
+    <canvas id="dd-chart"></canvas>
+  </div>
+</div>
+
+{% if is_walkforward_parent %}
+<div class="section-title">Walk-forward windows ({{ wf_children|length }})</div>
+<div class="card overflow-hidden mb-6">
+  <table class="htable">
+    <thead><tr><th>#</th><th>Test window</th><th class="r">Trades</th><th class="r">Win %</th><th class="r">Return</th><th class="r">Max DD</th><th>Locked params</th><th></th></tr></thead>
+    <tbody>
+    {% for c in wf_children %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td class="mono dim">{{ c.start_date }} → {{ c.end_date }}</td>
+        <td class="r num">{{ c.n_trades }}</td>
+        <td class="r num">{{ "%.0f"|format(c.win_rate * 100) }}%</td>
+        <td class="r num {% if c.total_return >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ "%+.2f"|format(c.total_return * 100) }}%</td>
+        <td class="r num">{{ "%.2f"|format(c.max_drawdown * 100) }}%</td>
+        <td class="mono text-xs dim">
+          {% if c.locked_overrides %}
+            {% for k, v in c.locked_overrides.items() %}{{ k }}={{ v }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% else %}—{% endif %}
+        </td>
+        <td><a class="link text-sm" href="/backtests/{{ c.id }}">view →</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% if regimes %}
+<div class="section-title">Regime breakdown</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+  <div class="card p-4">
+    <div class="stat-label mb-2">By SPY volatility (rolling 20d std)</div>
+    {% if regimes.vol %}
+    <table class="htable">
+      <thead><tr><th>Bucket</th><th class="r">Trades</th><th class="r">Win %</th><th class="r">Total $</th><th class="r">Avg $</th></tr></thead>
+      <tbody>
+        {% for k in ['low','mid','high','unknown'] %}
+          {% if regimes.vol.get(k) %}
+          {% set v = regimes.vol[k] %}
+          <tr>
+            <td class="mono">{{ k }}</td>
+            <td class="r num">{{ v.n_trades }}</td>
+            <td class="r num">{{ "%.0f"|format(v.win_rate * 100) }}%</td>
+            <td class="r num {% if v.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">${{ "%+.2f"|format(v.total_pnl) }}</td>
+            <td class="r num">${{ "%+.2f"|format(v.avg_pnl) }}</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<div class="dim text-sm">SPY bars not cached for this window.</div>{% endif %}
+  </div>
+  <div class="card p-4">
+    <div class="stat-label mb-2">By earnings season (Jan/Apr/Jul/Oct 10–31)</div>
+    <table class="htable">
+      <thead><tr><th>In season</th><th class="r">Trades</th><th class="r">Win %</th><th class="r">Total $</th><th class="r">Avg $</th></tr></thead>
+      <tbody>
+        {% for k in ['yes','no'] %}
+          {% if regimes.earnings_season.get(k) %}
+          {% set v = regimes.earnings_season[k] %}
+          <tr>
+            <td class="mono">{{ k }}</td>
+            <td class="r num">{{ v.n_trades }}</td>
+            <td class="r num">{{ "%.0f"|format(v.win_rate * 100) }}%</td>
+            <td class="r num {% if v.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">${{ "%+.2f"|format(v.total_pnl) }}</td>
+            <td class="r num">${{ "%+.2f"|format(v.avg_pnl) }}</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<div class="section-title">Trades ({{ trades|length }})</div>
+<div class="card overflow-hidden mb-6">
+  {% if trades %}
+  <table class="htable">
+    <thead><tr><th>Ticker</th><th>Entry</th><th>Exit</th><th class="r">Entry $</th><th class="r">Exit $</th><th class="r">Qty</th><th class="r">P&amp;L</th><th class="r">%</th><th>Reason</th><th class="r">Days</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+      <tr>
+        <td class="mono font-semibold">{{ t.ticker }}</td>
+        <td class="dim mono">{{ t.entry_date }}</td>
+        <td class="dim mono">{{ t.exit_date }}</td>
+        <td class="r num">${{ "%.2f"|format(t.entry) }}</td>
+        <td class="r num">${{ "%.2f"|format(t.exit) }}</td>
+        <td class="r num">{{ t.qty }}</td>
+        <td class="r num {% if t.net_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">${{ "%+.2f"|format(t.net_pnl) }}</td>
+        <td class="r num {% if t.pnl_pct >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">{{ "%+.2f"|format(t.pnl_pct * 100) }}%</td>
+        <td class="dim">{{ t.reason }}</td>
+        <td class="r num">{{ t.days_held }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty empty-hint">No trades executed in this backtest window.</div>{% endif %}
+</div>
+
+<details class="card p-4">
+  <summary class="cursor-pointer font-semibold text-sm" style="color: var(--muted);">Parameters <span class="mono">(seed={{ report.seed }})</span></summary>
+  <pre class="text-xs mono mt-3 p-3 rounded overflow-x-auto" style="background: #0d1423; border: 1px solid var(--border); color: var(--muted);">{{ params | tojson(indent=2) }}</pre>
+</details>
+
+<script id="bt-equity" type="application/json">{{ equity_curve | tojson }}</script>
+<script id="bt-dd" type="application/json">{{ dd_curve | tojson }}</script>
+<script id="bt-spy" type="application/json">{{ spy_curve | tojson }}</script>
+<script id="bt-baseline" type="application/json">{{ baseline_curve | tojson }}</script>
+<script id="bt-trades" type="application/json">{{ trades | tojson }}</script>
+<script>
+(function() {
+  function load(id) { try { return JSON.parse(document.getElementById(id).textContent); } catch(e) { return []; } }
+  function whenChartReady(cb, n) {
+    n = n || 0;
+    if (window.Chart) return cb();
+    if (n > 50) return;
+    setTimeout(function() { whenChartReady(cb, n + 1); }, 100);
+  }
+  whenChartReady(function() {
+    const equity = load('bt-equity');
+    const dd = load('bt-dd');
+    const spy = load('bt-spy');
+    const baseline = load('bt-baseline');
+    const trades = load('bt-trades');
+    if (!equity.length) return;
+
+    const labels = equity.map(p => p.date);
+    const css = getComputedStyle(document.documentElement);
+    const fg = (css.getPropertyValue('--fg-muted') || '#98a2b7').trim();
+    const grid = (css.getPropertyValue('--line') || '#1b2433').trim();
+    const info = (css.getPropertyValue('--info') || '#5eaaff').trim();
+    const err = (css.getPropertyValue('--err') || '#ff6b6b').trim();
+    const ok = (css.getPropertyValue('--ok') || '#3ddc97').trim();
+    const warn = (css.getPropertyValue('--warn') || '#ffb547').trim();
+
+    function tradePoints(predicate, color, style) {
+      const eqByDate = {};
+      equity.forEach(p => { eqByDate[p.date] = p.equity; });
+      const pts = [];
+      trades.forEach(t => {
+        const m = predicate(t);
+        if (!m) return;
+        const eq = eqByDate[m.date];
+        if (eq === undefined) return;
+        pts.push({ x: m.date, y: eq, _label: m.label });
+      });
+      return {
+        type: 'scatter',
+        label: style.label,
+        data: pts,
+        backgroundColor: color,
+        borderColor: color,
+        pointStyle: style.point,
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        showLine: false,
+      };
+    }
+
+    const datasets = [{
+      label: 'Strategy',
+      data: equity.map(p => p.equity),
+      borderColor: info,
+      backgroundColor: info + '22',
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.1,
+    }];
+    if (baseline.length) {
+      const bByDate = {};
+      baseline.forEach(p => { bByDate[p.date] = p.equity; });
+      datasets.push({
+        label: 'Baseline',
+        data: labels.map(d => bByDate[d] !== undefined ? bByDate[d] : null),
+        borderColor: '#a78bfa',
+        borderWidth: 1.5,
+        borderDash: [4, 3],
+        pointRadius: 0,
+        tension: 0.1,
+        spanGaps: true,
+      });
+    }
+    if (spy.length) {
+      const sByDate = {};
+      spy.forEach(p => { sByDate[p.date] = p.equity; });
+      datasets.push({
+        label: 'SPY (buy & hold)',
+        data: labels.map(d => sByDate[d] !== undefined ? sByDate[d] : null),
+        borderColor: fg,
+        borderWidth: 1,
+        borderDash: [2, 3],
+        pointRadius: 0,
+        tension: 0,
+        spanGaps: true,
+      });
+    }
+    datasets.push(tradePoints(
+      t => ({ date: t.entry_date, label: 'BUY ' + t.ticker }),
+      ok, { label: 'Entry', point: 'triangle' }
+    ));
+    datasets.push(tradePoints(
+      t => t.reason === 'target' ? { date: t.exit_date, label: 'TARGET ' + t.ticker } : null,
+      ok, { label: 'Target', point: 'circle' }
+    ));
+    datasets.push(tradePoints(
+      t => t.reason === 'stop' ? { date: t.exit_date, label: 'STOP ' + t.ticker } : null,
+      err, { label: 'Stop', point: 'crossRot' }
+    ));
+    datasets.push(tradePoints(
+      t => (t.reason && t.reason !== 'target' && t.reason !== 'stop')
+        ? { date: t.exit_date, label: t.reason.toUpperCase() + ' ' + t.ticker } : null,
+      warn, { label: 'Other exit', point: 'rectRot' }
+    ));
+
+    new Chart(document.getElementById('equity-chart'), {
+      type: 'line',
+      data: { labels: labels, datasets: datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'nearest', intersect: false },
+        plugins: {
+          legend: { labels: { color: fg, boxWidth: 10 } },
+          tooltip: {
+            callbacks: {
+              label: function(ctx) {
+                const v = ctx.parsed.y;
+                if (ctx.raw && ctx.raw._label) return ctx.raw._label + ' @ $' + (v || 0).toLocaleString();
+                return ctx.dataset.label + ': $' + (v != null ? v.toLocaleString() : '—');
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: fg, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { color: grid } },
+          y: { ticks: { color: fg, callback: v => '$' + v.toLocaleString() }, grid: { color: grid } },
+        },
+      },
+    });
+
+    if (dd.length) {
+      new Chart(document.getElementById('dd-chart'), {
+        type: 'line',
+        data: {
+          labels: dd.map(p => p.date),
+          datasets: [{
+            label: 'Drawdown %',
+            data: dd.map(p => p.dd_pct * 100),
+            borderColor: err,
+            backgroundColor: err + '22',
+            borderWidth: 1.5,
+            pointRadius: 0,
+            fill: true,
+            tension: 0.1,
+          }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: fg, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { color: grid } },
+            y: {
+              ticks: { color: fg, callback: v => v.toFixed(1) + '%' },
+              grid: { color: grid },
+              max: 0,
+            },
+          },
+        },
+      });
+    }
+  });
+})();
+</script>
+{% endblock %}
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <a href="/backtests" class="link text-sm">← All reports</a>
+  <h1 class="text-2xl font-bold">Backtest #{{ report.id }}</h1>
+  <span class="pill pill-brand mono">{{ report.strategy_id }}</span>
+</div>
+
+{% if report.contaminated %}
+<div class="card p-4 mb-5" style="border-left: 3px solid var(--warn);">
+  <div class="section-title" style="color: #fbbf24;">⚠ Memorization contamination</div>
+  <div class="text-sm">{{ report.contamination_notes }}</div>
+</div>
+{% endif %}
+
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="card stat">
+    <div class="stat-label">Window</div>
+    <div class="text-sm num" style="margin-top: 0.35rem;">{{ report.start_date }} → {{ report.end_date }}</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Trades</div>
+    <div class="stat-value num">{{ metrics.n_trades }}</div>
+    <div class="stat-sub">{{ metrics.n_wins }}W / {{ metrics.n_losses }}L · {{ "%.0f"|format(metrics.win_rate * 100) }}%</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Total Return</div>
+    <div class="stat-value num {% if metrics.total_return >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+      {{ "%+.2f"|format(metrics.total_return * 100) }}%
+    </div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Sharpe / Max DD</div>
+    <div class="stat-value num">
+      {% if metrics.sharpe is not none %}{{ "%.2f"|format(metrics.sharpe) }}{% else %}—{% endif %}
+    </div>
+    <div class="stat-sub">DD {{ "%.2f"|format(metrics.max_drawdown * 100) }}%</div>
+  </div>
+</div>
+
 <div class="section-title">Trades ({{ trades|length }})</div>
 <div class="card overflow-hidden mb-6">
   {% if trades %}

@@ -22,6 +22,20 @@ Five layers, strict interfaces. **Each layer can be swapped without touching the
 
 If you're unsure which layer something belongs to, check `Project-HERON.md` Section 4.
 
+## UI-First Operation
+
+**The dashboard is the primary operator surface.** The user will run almost everything through the web UI. The CLI exists for automation, scripting, and emergency access — not as the daily driver.
+
+Rules:
+- **Every operator action must have a dashboard surface.** If you add a CLI command that an operator might run more than once, also add the equivalent route + UI control in `heron/dashboard/`.
+- **Keep the CLI.** It is not deprecated. It must remain feature-complete for scripting, headless ops, and recovery. New CLI commands are still welcome — but never *only* CLI for operator-facing actions.
+- **Both surfaces share one implementation.** Put the logic in the layer module (e.g., `heron/backtest/`, `heron/strategy/`). The CLI command and the dashboard route are both thin wrappers. No business logic in `cli.py` or in route handlers.
+- **Surface decisions in the journal, not the terminal.** When the dashboard performs an action, log an `events` row so the user can see what happened in History without re-running it.
+- **Confirmation lives in the UI for risky actions.** Promote-to-LIVE, retire, kill-switch, mode-switch, force-close — all need an explicit click-to-confirm in the web UI. Operator-gated stays operator-gated regardless of surface.
+- **Default to the UI in docs and READMEs.** Show the dashboard path first; show the CLI equivalent as a "for scripting" alternative.
+
+When in doubt: if you wrote CLI-only, you wrote half the feature.
+
 ## Safety Invariants
 
 **This system trades real money.** These are non-negotiable:

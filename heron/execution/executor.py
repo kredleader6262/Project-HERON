@@ -71,12 +71,26 @@ class Executor:
 
         entry_price = quote["ask"] if side == "buy" else quote["bid"]
 
+        # B2: apply DERISK qty scaling before risk checks (so the scaled cost
+        # is what's evaluated against budgets).
+        from heron.strategy.policy import current_system_mode, derisk_qty
+        sys_mode = current_system_mode(self.conn)
+        if sys_mode == "DERISK":
+            scaled = derisk_qty(qty, mode_state=sys_mode)
+            if scaled != qty:
+                log_event(self.conn, "derisk_size_scaled",
+                          f"{ticker} qty {qty} -> {scaled} (DERISK)",
+                          severity="info", source="executor")
+                qty = scaled
+            if qty <= 0:
+                raise ValueError("DERISK scaled qty to 0")
+
         # Run all pre-trade risk checks (mode-aware)
         checks = pre_trade_checks(
             self.conn, ticker, entry_price, stop_price, qty, equity,
             quote["age_seconds"], strategy_config=strategy_config,
             requires_same_day_exit=requires_same_day_exit,
-            mode=mode,
+            mode=mode, strategy_id=strategy_id,
         )
         failures = [(name, c) for name, c in checks if not c.ok]
         if failures:

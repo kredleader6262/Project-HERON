@@ -63,8 +63,18 @@ ALPACA_BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.ma
 # --- SEC ---
 SEC_USER_AGENT = os.environ.get("SEC_USER_AGENT", "HERON-research your-email@example.com")
 
+# --- Finnhub (earnings calendar) ---
+FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY", "")
+
 # --- Cost ---
 MONTHLY_COST_CEILING = _cfg.get("cost", {}).get("monthly_ceiling_usd", 45.0)
+
+# --- Portfolio allocator (B1) ---
+PORTFOLIO_CONFIG = _cfg.get("portfolio", {}) or {}
+
+# --- Policy engine (B2) ---
+POLICY_CONFIG = _cfg.get("policy", {}) or {}
+POLICIES = _cfg.get("policies", []) or []
 
 # --- Ollama ---
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")

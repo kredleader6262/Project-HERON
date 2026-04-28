@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <h1 class="text-2xl font-bold">Policies & system mode</h1>
+  <span class="dim text-sm">Declarative kill-switch / de-risk rules evaluated each executor cycle.</span>
+</div>
+
+<div class="card p-4 mb-4">
+  <div class="flex items-center gap-6">
+    <div>
+      <div class="dim text-xs">Current system mode</div>
+      <div class="text-xl mono">
+        <strong>{{ system_mode }}</strong>
+        {% if system_mode == 'SAFE' %}<span class="pill pill-error">entries blocked</span>{% endif %}
+        {% if system_mode == 'DERISK' %}<span class="pill pill-warning">sizing scaled</span>{% endif %}
+      </div>
+    </div>
+    <div class="flex-1"></div>
+    <form method="post" action="/policies/override" class="flex items-end gap-2">
+      <label class="text-xs">Override
+        <select name="mode" class="block mt-1 px-2 py-1 mono"
+                style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+          <option value="NORMAL">NORMAL</option>
+          <option value="DERISK">DERISK</option>
+          <option value="SAFE">SAFE</option>
+        </select>
+      </label>
+      <input type="text" name="reason" placeholder="reason (required)" required
+             class="px-2 py-1 mono" style="background: var(--surface-2); border: 1px solid var(--line); color: var(--fg);">
+      <button type="submit" class="btn btn-brand"
+              onclick="return confirm('Override system mode?');">Apply</button>
+    </form>
+  </div>
+</div>
+
+<div class="section-title">State (this cycle)</div>
+<div class="card p-4 mb-4">
+  <table class="htable">
+    <tbody>
+      {% for k, v in state.items() %}
+      <tr><td class="mono">{{ k }}</td><td class="mono">{{ v }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="section-title">Rules ({{ rules|length }})</div>
+<div class="card overflow-hidden mb-4">
+  {% if not rules %}
+    <div class="p-4 dim">No policies configured. Add to <code class="mono">config.yaml::policies:</code>.</div>
+  {% else %}
+  <table class="htable">
+    <thead><tr><th>ID</th><th>When</th><th>Then</th><th>Status</th><th>Reason</th></tr></thead>
+    <tbody>
+    {% for r in rules %}
+      <tr>
+        <td class="mono">{{ r.id }}</td>
+        <td class="mono text-xs">{{ r.when }}</td>
+        <td class="mono">{{ r.then }}</td>
+        <td>
+          {% if r.id in fired_ids %}
+            <span class="pill pill-warning">FIRED</span>
+          {% else %}
+            <span class="dim text-xs">ok</span>
+          {% endif %}
+        </td>
+        <td class="text-xs dim">{{ r.reason }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="section-title">Recent system_mode events</div>
+<div class="card overflow-hidden">
+  {% if not events %}
+    <div class="p-4 dim">No mode transitions logged.</div>
+  {% else %}
+  <table class="htable">
+    <thead><tr><th>When</th><th>Mode</th><th>Source</th><th>Details</th></tr></thead>
+    <tbody>
+    {% for e in events %}
+      <tr>
+        <td class="mono text-xs">{{ e.created_at[:19] }}</td>
+        <td class="mono">{{ e.message }}</td>
+        <td class="mono text-xs">{{ e.source }}</td>
+        <td class="text-xs dim">{{ e.details_json or "" }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endblock %}

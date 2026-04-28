@@ -47,6 +47,7 @@
       <input type="hidden" name="reason" value="Operator rejected via dashboard">
       <button type="submit" class="btn btn-danger">Reject</button>
     </form>
+    <a href="{{ url_for('strategy_detail', strategy_id=s.id) }}#sweep" class="btn">Smoke backtest</a>
   </div>
 </div>
 {% endfor %}

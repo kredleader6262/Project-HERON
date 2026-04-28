@@ -146,6 +146,52 @@ def test_wash_sale_rejects(setup):
                                 mode="live")
 
 
+def test_portfolio_cap_blocks_entry_when_throttled(setup):
+    """B1: a strategy in PAPER with parity=fail + drawdown should be capped."""
+    from heron.journal.strategies import transition_strategy
+    executor, conn, broker = setup
+    transition_strategy(conn, "pead", "PAPER", reason="t")
+    # Insert a parity=fail backtest report (lowers parity_factor to 0.5).
+    import json
+    conn.execute(
+        """INSERT INTO backtest_reports
+           (strategy_id, start_date, end_date, params_json, seed,
+            metrics_json, trades_json, created_at)
+           VALUES ('pead', '2024-01-01', '2024-12-31', '{}', 42, ?, '[]',
+                   datetime('now'))""",
+        (json.dumps({"parity": {"available": True, "passes": False,
+                                "ci_lower": -0.001}}),),
+    )
+    conn.commit()
+    # 0.15 base × 0.5 parity = 0.075 of $500 = $37.50.
+    # 2 shares × $150.50 ask = $301 → should fail portfolio cap.
+    with pytest.raises(ValueError, match="portfolio_cap|Portfolio cap"):
+        executor.enter_position("pead", "AAPL", 2, stop_price=145.0,
+                                target_price=160.0, mode="paper")
+
+
+def test_safe_mode_blocks_entry(setup):
+    """B2: SAFE mode rejects all entries via system_mode check."""
+    from heron.strategy.policy import set_system_mode
+    executor, conn, broker = setup
+    set_system_mode(conn, "SAFE", reason="test", operator="test")
+    with pytest.raises(ValueError, match="system_mode|SAFE"):
+        executor.enter_position("pead", "AAPL", 2, stop_price=145.0,
+                                target_price=160.0, mode="paper")
+
+
+def test_derisk_mode_scales_qty(setup):
+    """B2: DERISK mode halves qty before submit."""
+    from heron.strategy.policy import set_system_mode
+    executor, conn, broker = setup
+    set_system_mode(conn, "DERISK", reason="test", operator="test")
+    trade_id, _ = executor.enter_position(
+        "pead", "AAPL", 4, stop_price=145.0, target_price=160.0)
+    from heron.journal.trades import get_trade
+    t = get_trade(conn, trade_id)
+    assert t["qty"] == 2.0  # 4 × 0.5
+
+
 # ── Exit Checks ──────────────────────────────────
 
 def test_check_exits_stop_hit(setup):

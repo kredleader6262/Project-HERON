@@ -1,6 +1,7 @@
 """HERON CLI — data, journal, and demo commands."""
 
 import json
+import os
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -107,6 +108,142 @@ def quote(ticker):
         click.echo(f"[quote error: {e}]")
     finally:
         feed.close()
+
+
+@data.group("earnings")
+def data_earnings():
+    """Earnings calendar / surprise data (Finnhub)."""
+    pass
+
+
+@data_earnings.command("fetch")
+@click.option("--start", required=True, help="YYYY-MM-DD inclusive.")
+@click.option("--end", required=True, help="YYYY-MM-DD inclusive.")
+@click.option("--universe", default=None,
+              help="Comma-separated tickers; default = WATCHLIST.")
+def data_earnings_fetch(start, end, universe):
+    """Fetch and cache earnings events from Finnhub for [start, end]."""
+    from heron.config import WATCHLIST
+    from heron.data.cache import get_conn, init_db
+    from heron.data.earnings import fetch_and_cache
+
+    tickers = [t.strip().upper() for t in universe.split(",")] if universe else list(WATCHLIST)
+    conn = get_conn()
+    init_db(conn)
+    try:
+        n = fetch_and_cache(conn, start, end, universe=tickers)
+        click.echo(f"Cached {n} earnings events for {len(tickers)} tickers, {start} → {end}.")
+    except RuntimeError as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1)
+    finally:
+        conn.close()
+
+
+@data_earnings.command("list")
+@click.option("--start", default=None)
+@click.option("--end", default=None)
+@click.option("--ticker", default=None)
+@click.option("--min-surprise", default=None, type=float,
+              help="Filter |surprise_pct| >= this.")
+@click.option("--limit", default=50)
+def data_earnings_list(start, end, ticker, min_surprise, limit):
+    """List cached earnings events."""
+    from heron.data.cache import get_conn, init_db
+    from heron.data.earnings import get_earnings_events
+
+    conn = get_conn()
+    init_db(conn)
+    try:
+        rows = get_earnings_events(
+            conn,
+            start=start, end=end,
+            tickers=[ticker.upper()] if ticker else None,
+            min_abs_surprise=min_surprise,
+        )
+        if not rows:
+            click.echo("(no events)")
+            return
+        for r in rows[:limit]:
+            s = r["surprise_pct"]
+            surp = f"{s:+.2f}%" if s is not None else "NA"
+            click.echo(f"  {r['event_date']}  {r['ticker']:<6}  "
+                       f"{(r['event_time'] or '?'):>3}  "
+                       f"actual={r['eps_actual']}  est={r['eps_estimate']}  "
+                       f"surprise={surp}")
+        if len(rows) > limit:
+            click.echo(f"... {len(rows) - limit} more.")
+    finally:
+        conn.close()
+
+
+@data.group("universe")
+def data_universe():
+    """Manage point-in-time universe snapshots."""
+    pass
+
+
+@data_universe.command("snapshot")
+@click.option("--date", "snapshot_date", required=True,
+              help="YYYY-MM-DD — the date this universe was current.")
+@click.option("--tickers", required=True,
+              help="Comma-separated list of tickers in the universe at that date.")
+@click.option("--note", default=None, help="Optional human note.")
+def data_universe_snapshot(snapshot_date, tickers, note):
+    """Record a point-in-time universe membership.
+
+    The backtest runner prefers the most recent snapshot ≤ as_of when
+    resolving a strategy's universe, so this enables survivorship-aware
+    replay without paid data.
+    """
+    from heron.data.cache import get_conn, init_db
+    from heron.util import utc_now_iso
+
+    syms = [t.strip().upper() for t in tickers.split(",") if t.strip()]
+    if not syms:
+        click.echo("No tickers parsed from --tickers", err=True)
+        raise SystemExit(1)
+    now = utc_now_iso()
+    conn = get_conn()
+    init_db(conn)
+    try:
+        conn.executemany(
+            """INSERT OR REPLACE INTO universe_snapshots
+               (snapshot_date, ticker, source, note, created_at)
+               VALUES (?, ?, 'manual', ?, ?)""",
+            [(snapshot_date, t, note, now) for t in syms],
+        )
+        conn.commit()
+        click.echo(f"Stored {len(syms)} tickers for snapshot {snapshot_date}.")
+    finally:
+        conn.close()
+
+
+@data_universe.command("list")
+@click.option("--limit", default=20)
+def data_universe_list(limit):
+    """List recorded universe snapshots, newest first."""
+    from heron.data.cache import get_conn, init_db
+    conn = get_conn()
+    init_db(conn)
+    try:
+        dates = conn.execute(
+            "SELECT snapshot_date, COUNT(*) AS n FROM universe_snapshots "
+            "GROUP BY snapshot_date ORDER BY snapshot_date DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        if not dates:
+            click.echo("(no snapshots)")
+            return
+        for d in dates:
+            tickers = [r[0] for r in conn.execute(
+                "SELECT ticker FROM universe_snapshots WHERE snapshot_date=? ORDER BY ticker",
+                (d["snapshot_date"],),
+            ).fetchall()]
+            click.echo(f"  {d['snapshot_date']}  ({d['n']:>3}) {', '.join(tickers[:8])}"
+                       + (f" … +{len(tickers)-8} more" if len(tickers) > 8 else ""))
+    finally:
+        conn.close()
 
 
 @cli.group()
@@ -368,6 +505,90 @@ def dashboard(host, port, debug):
     app = create_app()
     click.echo(f"Starting HERON dashboard at http://{host}:{port}")
     app.run(host=host, port=port, debug=debug)
+
+
+@cli.command()
+@click.option("--capital", type=float, help="USD capital for first paper campaign.")
+@click.option("--cadence", type=click.Choice(["premarket_only", "premarket_eod", "full"]),
+              default="premarket_eod")
+@click.option("--max-capital-pct", type=float, default=0.15)
+@click.option("--max-positions", type=int, default=3)
+@click.option("--drawdown-budget-pct", type=float, default=0.05)
+@click.option("--plan", "plan_only", is_flag=True, help="Show plan; do not write.")
+@click.option("--yes", is_flag=True, help="Skip confirmations (non-interactive).")
+def init(capital, cadence, max_capital_pct, max_positions,
+         drawdown_budget_pct, plan_only, yes):
+    """First-run setup: create initial paper campaign + PEAD strategy + baseline."""
+    from heron.journal import get_journal_conn, init_journal
+    from heron.runtime.setup import (
+        plan_initial_setup, apply_initial_setup, is_already_setup,
+        SetupAlreadyDoneError,
+    )
+
+    init_journal()
+    conn = get_journal_conn()
+
+    if is_already_setup(conn):
+        click.echo("Journal already populated. Setup is a no-op.")
+        click.echo("Visit /strategies in the dashboard to see what's there.")
+        conn.close()
+        return
+
+    if capital is None and not yes:
+        capital = click.prompt("Starting capital (USD)", type=float, default=500.0)
+    elif capital is None:
+        capital = 500.0
+
+    try:
+        plan = plan_initial_setup(
+            capital_usd=capital,
+            cadence=cadence,
+            max_capital_pct=max_capital_pct,
+            max_positions=max_positions,
+            drawdown_budget_pct=drawdown_budget_pct,
+        )
+    except ValueError as e:
+        click.echo(f"Bad inputs: {e}", err=True)
+        conn.close()
+        raise SystemExit(1)
+
+    click.echo("\n=== Initial setup plan ===")
+    cmp = plan["campaign"]
+    click.echo(f"Campaign:   {cmp['id']}  ({cmp['mode']}, ${cmp['capital_allocation_usd']:.2f}, "
+               f"{cmp['paper_window_days']}d window)")
+    click.echo("Strategies:")
+    for s in plan["strategies"]:
+        marker = " (baseline)" if s.get("is_baseline") else ""
+        click.echo(f"  - {s['id']}  → {s['state_target']}{marker}")
+    g = plan["guardrails"]
+    click.echo(f"Guardrails: max_capital={g['max_capital_pct']:.0%}  "
+               f"max_positions={g['max_positions']}  dd_budget={g['drawdown_budget_pct']:.0%}")
+    click.echo(f"Cadence:    {plan['cadence']['preset']}  "
+               f"(jobs hint: {', '.join(plan['cadence']['jobs'])})")
+
+    if plan_only:
+        click.echo("\n--plan: nothing written.")
+        conn.close()
+        return
+
+    if not yes:
+        if not click.confirm("\nApply this plan?", default=False):
+            click.echo("aborted.")
+            conn.close()
+            return
+
+    try:
+        result = apply_initial_setup(conn, plan)
+    except SetupAlreadyDoneError as e:
+        click.echo(str(e), err=True)
+        conn.close()
+        raise SystemExit(1)
+
+    click.echo(f"\nDone. Campaign {result['campaign_id']} created with "
+               f"{len(result['strategy_ids'])} strategies.")
+    click.echo("Next: `heron data today --tickers ...` to seed market bars, "
+               "then visit /strategies in the dashboard.")
+    conn.close()
 
 
 @cli.group()
@@ -698,6 +919,96 @@ def audit_list(audit_type, limit):
                    f"{(r['notes'] or '')[:80]}")
 
 
+@audit.command("contamination")
+@click.argument("path", required=False)
+def audit_contamination(path):
+    """Static AST scan for PIT-leak patterns (missing as_of= on data reads).
+
+    PATH defaults to heron/strategy. Pass a single .py file or a directory.
+    Exits 1 if any findings — suitable for CI.
+    """
+    import sys
+    from heron.research.audit import contamination_audit
+    target = path or os.path.join("heron", "strategy")
+    findings = contamination_audit(target)
+    if not findings:
+        click.echo(f"✓ {target}: no contamination findings.")
+        return
+    click.echo(f"⚠ {target}: {len(findings)} finding(s):")
+    for f in findings:
+        click.echo(f"  {f['file']}:{f['line']}  [{f['rule']}]  {f['message']}")
+    sys.exit(1)
+
+
+@cli.group()
+def policy():
+    """Policy engine + system mode (B2)."""
+    pass
+
+
+@policy.command("status")
+@click.option("--mode", default="paper", help="paper or live")
+def policy_status(mode):
+    """Show current system mode + which rules would fire."""
+    from heron.journal import get_journal_conn, init_journal
+    from heron.strategy.policy import (
+        assemble_state, evaluate_policies, current_system_mode,
+    )
+    init_journal()
+    conn = get_journal_conn()
+    state = assemble_state(conn, mode=mode, equity=10000.0)
+    actions = evaluate_policies(state)
+    sys_mode = current_system_mode(conn)
+    click.echo(f"System mode: {sys_mode}")
+    click.echo("State:")
+    for k, v in state.items():
+        click.echo(f"  {k:28s} {v}")
+    if not actions:
+        click.echo("Triggered rules: (none)")
+    else:
+        click.echo(f"Triggered rules ({len(actions)}):")
+        for a in actions:
+            click.echo(f"  • {a['id']:20s} -> {a['action']:15s} {a['reason']}")
+    conn.close()
+
+
+@policy.command("override")
+@click.argument("new_mode", type=click.Choice(["NORMAL", "DERISK", "SAFE"]))
+@click.option("--reason", required=True, help="Required reason for the override.")
+def policy_override(new_mode, reason):
+    """Force a system mode transition (operator action)."""
+    from heron.journal import get_journal_conn, init_journal
+    from heron.strategy.policy import set_system_mode
+    init_journal()
+    conn = get_journal_conn()
+    prior = set_system_mode(conn, new_mode, reason=reason,
+                            operator="cli", triggered_by=["operator_override"])
+    click.echo(f"System mode: {prior} -> {new_mode}")
+    conn.close()
+
+
+@policy.command("eval")
+@click.option("--mode", default="paper")
+def policy_eval(mode):
+    """Run policy evaluation now and apply the resulting mode (idempotent)."""
+    from heron.journal import get_journal_conn, init_journal
+    from heron.strategy.policy import (
+        assemble_state, evaluate_policies, resolve_mode,
+        current_system_mode, set_system_mode,
+    )
+    init_journal()
+    conn = get_journal_conn()
+    state = assemble_state(conn, mode=mode, equity=10000.0)
+    actions = evaluate_policies(state)
+    prior = current_system_mode(conn)
+    target = resolve_mode(actions, prior_mode="NORMAL")
+    if target != prior:
+        set_system_mode(conn, target, reason="cli eval",
+                        operator="cli", triggered_by=[a["id"] for a in actions])
+    click.echo(f"{prior} -> {target}  ({len(actions)} rule(s) fired)")
+    conn.close()
+
+
 @cli.group()
 def alert():
     """Discord alert commands (M12)."""
@@ -776,40 +1087,28 @@ def backtest():
 @click.option("--end", default=None, help="End date YYYY-MM-DD (default: latest cached bar).")
 @click.option("--seed", default=0, help="RNG seed for determinism.")
 @click.option("--equity", default=100_000.0, help="Initial equity.")
+@click.option("--seeder", type=click.Choice(["synthetic", "real"]), default="synthetic",
+              help="synthetic = bar-derived fake surprises; real = cached earnings_events.")
 @click.option("--save/--no-save", default=True, help="Persist report to journal.")
-def backtest_run(strategy_id, start, end, seed, equity, save):
+def backtest_run(strategy_id, start, end, seed, equity, seeder, save):
     """Run a deterministic backtest for a strategy."""
     from heron.journal import get_journal_conn, init_journal
-    from heron.journal.strategies import get_strategy
-    from heron.data.cache import get_bars
-    from heron.strategy.pead import PEADStrategy, PEAD_UNIVERSE
-    from heron.backtest import run_backtest, save_report
-    from heron.backtest.seeders import synthetic_pead_candidates
+    from heron.backtest import run_strategy_backtest
 
     init_journal()
     conn = get_journal_conn()
-    s = get_strategy(conn, strategy_id)
-    if not s:
-        click.echo(f"Strategy {strategy_id} not found", err=True)
+    try:
+        result = run_strategy_backtest(
+            conn, strategy_id,
+            start=start, end=end, seed=seed, initial_equity=equity,
+            save=save, seeder=seeder,
+        )
+    except ValueError as e:
+        click.echo(str(e), err=True)
         raise SystemExit(1)
 
-    # Load bars for strategy's universe
-    bars = []
-    for ticker in PEAD_UNIVERSE:
-        bars.extend(get_bars(conn, ticker, "1Day", start=start, end=end))
-    if not bars:
-        click.echo("No cached bars found. Run `heron data today --days 200` first.", err=True)
-        raise SystemExit(1)
-
-    click.echo(f"Loaded {len(bars)} bars across {len(PEAD_UNIVERSE)} tickers")
-
-    cands = synthetic_pead_candidates(bars, universe=PEAD_UNIVERSE, seed=seed)
-    click.echo(f"Generated {len(cands)} synthetic candidates (seed={seed})")
-
-    strat = PEADStrategy(strategy_id=strategy_id, is_llm_variant=False)
-    result = run_backtest(strat, bars, cands,
-                          start_date=start, end_date=end,
-                          initial_equity=equity, seed=seed)
+    universe = result.get("universe", [])
+    click.echo(f"Universe: {','.join(universe)}  (seeder={seeder})")
 
     m = result["metrics"]
     click.echo(f"\n=== Backtest: {strategy_id} ===")
@@ -824,15 +1123,141 @@ def backtest_run(strategy_id, start, end, seed, equity, save):
     click.echo(f"  Fees paid:   ${m['total_fees']:.2f}")
     click.echo(f"  Final eq:    ${result['final_equity']:,.2f}")
 
-    if save:
-        report_id = save_report(conn, result)
+    report_id = result.get("report_id")
+    if report_id:
         row = conn.execute(
             "SELECT contaminated, contamination_notes FROM backtest_reports WHERE id=?",
             (report_id,),
         ).fetchone()
         click.echo(f"\n  Saved report #{report_id}")
-        if row["contaminated"]:
+        if row and row["contaminated"]:
             click.echo(f"  ⚠ {row['contamination_notes']}")
+    conn.close()
+
+
+@backtest.command("walkforward")
+@click.argument("strategy_id")
+@click.option("--start", required=True, help="Overall start YYYY-MM-DD.")
+@click.option("--end", required=True, help="Overall end YYYY-MM-DD.")
+@click.option("--train", "train_months", default=6, help="Train window months (used for fitting when --vary is set).")
+@click.option("--test", "test_months", default=3, help="Test window months.")
+@click.option("--step", "step_months", default=3, help="Step months between windows.")
+@click.option("--seed", default=0)
+@click.option("--equity", default=100_000.0)
+@click.option("--seeder", type=click.Choice(["synthetic", "real"]), default="synthetic")
+@click.option("--vary", "vary", multiple=True,
+              help="Optional axis spec like 'stop_mult=1.0,1.5,2.0' for per-window fitting. Repeatable.")
+@click.option("--objective", type=click.Choice(["sharpe", "total_return", "win_rate", "avg_trade_pnl"]),
+              default="sharpe", help="Fit objective when --vary is provided.")
+def backtest_walkforward(strategy_id, start, end, train_months, test_months,
+                         step_months, seed, equity, seeder, vary, objective):
+    """Run a walk-forward backtest (sliding test windows). Optionally fit params per train window."""
+    import json as _json
+    from heron.journal import get_journal_conn, init_journal
+    from heron.journal.strategies import get_strategy
+    from heron.backtest.walkforward import run_walkforward
+    from heron.backtest.sweep import parse_axes
+
+    init_journal()
+    conn = get_journal_conn()
+
+    axes = None
+    if vary:
+        s = get_strategy(conn, strategy_id)
+        if not s:
+            click.echo(f"Strategy {strategy_id!r} not found", err=True)
+            conn.close()
+            raise SystemExit(1)
+        try:
+            base_cfg = _json.loads(s["config"]) if s["config"] else {}
+        except (TypeError, _json.JSONDecodeError):
+            base_cfg = {}
+        try:
+            axes = parse_axes(list(vary), base_cfg)
+        except ValueError as e:
+            click.echo(str(e), err=True)
+            conn.close()
+            raise SystemExit(1)
+
+    try:
+        res = run_walkforward(
+            conn, strategy_id,
+            start=start, end=end,
+            train_months=train_months, test_months=test_months, step_months=step_months,
+            seed=seed, initial_equity=equity, seeder=seeder,
+            axes=axes, objective=objective,
+        )
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        conn.close()
+        raise SystemExit(1)
+
+    m = res["metrics"]
+    click.echo(f"\n=== Walk-forward {strategy_id} (id={res['walkforward_id']}) ===")
+    click.echo(f"  Windows:      {m['n_windows']}")
+    click.echo(f"  Trades:       {m['n_trades']} ({m['n_wins']}W / {m['n_losses']}L)")
+    click.echo(f"  Win rate:     {m['win_rate']:.1%}")
+    click.echo(f"  Total ret:    {m['total_return']:+.2%}")
+    click.echo(f"  Max DD:       {m['max_drawdown']:.2%}")
+    if axes:
+        click.echo(f"  Fit axes:     {axes}  objective={objective}")
+        for c in res["children"]:
+            if c["locked_overrides"]:
+                click.echo(f"    win {c['window_index']} ({c['test_start']}..{c['test_end']}): "
+                           f"locked={c['locked_overrides']}")
+    click.echo(f"  Parent #{res['parent_report_id']}  children: "
+               f"{', '.join('#' + str(c['report_id']) for c in res['children'])}")
+    conn.close()
+
+
+@backtest.command("sweep")
+@click.argument("strategy_id")
+@click.option("--vary", "vary", multiple=True, required=True,
+              help="Axis spec like 'stop_mult=1.0,1.5,2.0'. Repeatable.")
+@click.option("--start", help="Start YYYY-MM-DD.")
+@click.option("--end", help="End YYYY-MM-DD.")
+@click.option("--seed", default=0)
+@click.option("--equity", default=100_000.0)
+@click.option("--seeder", type=click.Choice(["synthetic", "real"]), default="synthetic")
+def backtest_sweep(strategy_id, vary, start, end, seed, equity, seeder):
+    """Cartesian param sweep across the strategy's tunable axes."""
+    from heron.journal import get_journal_conn, init_journal
+    from heron.journal.strategies import get_strategy
+    from heron.backtest.sweep import parse_axes, run_sweep
+
+    init_journal()
+    conn = get_journal_conn()
+    s = get_strategy(conn, strategy_id)
+    if not s:
+        click.echo(f"strategy {strategy_id!r} not found", err=True)
+        conn.close()
+        raise SystemExit(1)
+    base_cfg = json.loads(s["config"]) if s["config"] else {}
+
+    try:
+        axes = parse_axes(vary, base_cfg)
+        res = run_sweep(conn, strategy_id, axes,
+                        start=start, end=end, seed=seed,
+                        initial_equity=equity, seeder=seeder)
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        conn.close()
+        raise SystemExit(1)
+
+    click.echo(f"\n=== Sweep {strategy_id} (id={res['sweep_id']}) ===")
+    click.echo(f"  Combos run:   {res['n_saved']}/{res['n_combos']}")
+    # Sort summaries by total_return desc.
+    rows = sorted(res["summaries"],
+                  key=lambda r: r["metrics"].get("total_return", 0),
+                  reverse=True)
+    for r in rows[:10]:
+        m = r["metrics"]
+        ov = " ".join(f"{k}={v}" for k, v in r["overrides"].items())
+        click.echo(f"  #{r['report_id']:>4}  ret={m['total_return']:+.2%}  "
+                   f"sharpe={m.get('sharpe', 0):.2f}  dd={m['max_drawdown']:.2%}  "
+                   f"trades={m['n_trades']:>3}  {ov}")
+    if len(rows) > 10:
+        click.echo(f"  ... +{len(rows)-10} more")
     conn.close()
 
 
@@ -860,6 +1285,55 @@ def backtest_list(strategy, limit):
                    f"{r['start_date']} → {r['end_date']}  "
                    f"{r['n_trades']:<7} {r['total_return']:+.2%}   "
                    f"{sharpe:<8} {memo}")
+    conn.close()
+
+
+@backtest.command("reparity")
+@click.option("--report-id", type=int, default=None,
+              help="Recompute a single report. Omit to backfill ALL reports missing parity.")
+@click.option("--strategy", default=None, help="Limit --all backfill to this strategy id.")
+def backtest_reparity(report_id, strategy):
+    """Recompute parity verdict + regime breakdown on existing reports.
+
+    Useful after running a baseline backtest for an LLM strategy that
+    already had reports saved without parity.
+    """
+    from heron.journal import get_journal_conn, init_journal
+    from heron.backtest import reparity_report
+
+    init_journal()
+    conn = get_journal_conn()
+    if report_id is not None:
+        targets = [report_id]
+    else:
+        q = "SELECT id FROM backtest_reports"
+        params = []
+        if strategy:
+            q += " WHERE strategy_id=?"
+            params.append(strategy)
+        q += " ORDER BY id"
+        targets = [r[0] for r in conn.execute(q, params).fetchall()]
+    if not targets:
+        click.echo("(no reports to reparity)")
+        return
+    passed = blocked = 0
+    for rid in targets:
+        try:
+            m = reparity_report(conn, rid)
+        except Exception as e:  # noqa: BLE001
+            click.echo(f"  {rid}: error — {e}")
+            continue
+        p = m.get("parity") or {}
+        if p.get("available") and p.get("passes"):
+            verdict, passed_inc = "PASS", 1
+        elif p.get("available"):
+            verdict, passed_inc = "FAIL", 0
+        else:
+            verdict, passed_inc = p.get("reason", "n/a"), 0
+        passed += passed_inc
+        blocked += 0 if passed_inc else 1
+        click.echo(f"  {rid}: {verdict}")
+    click.echo(f"\n{len(targets)} reports updated · {passed} pass · {blocked} non-pass")
     conn.close()
 
 

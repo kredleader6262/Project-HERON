@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Mission Control</h1>
+    <div class="lede">
+      {% if inbox_count %}
+        {{ inbox_count }} item{% if inbox_count != 1 %}s{% endif %} need attention.
+      {% else %}
+        Inbox clear. System nominal.
+      {% endif %}
+    </div>
+  </div>
+  <div class="flex gap-2">
+    <a class="link" href="/overview">Legacy overview →</a>
+  </div>
+</div>
+
+<style>
+  .mc-grid { display: grid; gap: 1.25rem; grid-template-columns: 2fr 1fr; }
+  @media (max-width: 900px) { .mc-grid { grid-template-columns: 1fr; } }
+  .decision-card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    margin-bottom: 0.75rem;
+  }
+  .decision-card .card-head { display: flex; flex-direction: column; gap: 0.2rem; }
+  .decision-card h3 { font-size: 0.92rem; }
+  .decision-card .card-body { margin: 0.5rem 0; }
+  .decision-card .card-actions {
+    display: flex; gap: 0.5rem; align-items: center;
+    margin-top: 0.6rem; padding-top: 0.6rem;
+    border-top: 1px dashed var(--line);
+  }
+  .decision-card[data-kind="policy"] { border-left: 3px solid var(--warn); }
+  .decision-card[data-kind="contamination"] { border-left: 3px solid var(--err); }
+  .decision-card[data-kind="review"] { border-left: 3px solid var(--warn); }
+  .btn {
+    background: var(--surface-2); color: var(--fg);
+    border: 1px solid var(--line-2); border-radius: 5px;
+    padding: 0.35rem 0.75rem; font-size: 0.78rem; cursor: pointer;
+    font-family: inherit;
+  }
+  .btn:hover { border-color: var(--accent-line); }
+  .btn-primary { background: var(--accent-weak); border-color: var(--accent-line); color: var(--fg); }
+  .mc-empty { color: var(--fg-dim); font-size: 0.82rem; padding: 0.6rem 0; font-style: italic; }
+  .mc-section { margin-bottom: 1.6rem; }
+  .mc-state-row {
+    display: flex; justify-content: space-between; gap: 0.75rem;
+    padding: 0.5rem 0; border-bottom: 1px dashed var(--line);
+    font-size: 0.82rem;
+  }
+  .mc-state-row:last-child { border-bottom: none; }
+  .action-grid { display: grid; gap: 0.5rem; }
+  .action-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0.55rem 0.7rem;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+  }
+  .action-row .hint { font-size: 0.72rem; color: var(--fg-dim); }
+  .mode-badge {
+    display: inline-block; padding: 0.15rem 0.55rem; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; font-size: 0.72rem;
+    background: var(--surface-2); border: 1px solid var(--line-2);
+  }
+  .mode-badge.derisk { color: var(--warn); border-color: var(--warn); }
+  .mode-badge.safe { color: var(--err); border-color: var(--err); }
+</style>
+
+<div class="mc-grid">
+
+  <!-- ── INBOX ──────────────────────────────────────────────────── -->
+  <div>
+    <div class="section-title">Inbox</div>
+
+    <!-- Policy alerts (most urgent — these gate trading) -->
+    {% if fired_actions %}
+    <div class="mc-section">
+      {% for act in fired_actions %}
+        {% include "_card_policy.html" %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Contamination findings -->
+    {% if contamination %}
+    <div class="mc-section">
+      {% for f in contamination[:5] %}
+        {% include "_card_contamination.html" %}
+      {% endfor %}
+      {% if contamination|length > 5 %}
+        <a class="link" href="/audits/contamination">
+          + {{ contamination|length - 5 }} more findings →
+        </a>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Monthly review -->
+    {% if not review_ok %}
+    <div class="mc-section">
+      {% include "_card_review.html" %}
+    </div>
+    {% endif %}
+
+    <!-- Strategy proposals -->
+    <div class="mc-section">
+      <div class="micro" style="margin-bottom:0.5rem;">
+        Proposals ({{ proposed|length }})
+        {% if proposed|length %} · <a class="link" href="/proposals">view all →</a>{% endif %}
+      </div>
+      {% if proposed %}
+        {% for p in proposed[:5] %}
+          {% include "_card_proposal.html" %}
+        {% endfor %}
+        {% if proposed|length > 5 %}
+          <a class="link" href="/proposals">+ {{ proposed|length - 5 }} more →</a>
+        {% endif %}
+      {% else %}
+        <div class="mc-empty">No proposals awaiting review.</div>
+      {% endif %}
+    </div>
+
+    <!-- Pending candidates -->
+    <div class="mc-section">
+      <div class="micro" style="margin-bottom:0.5rem;">
+        Pending candidates ({{ pending_candidates|length }})
+        {% if pending_candidates|length %}
+          · <a class="link" href="/candidates?disposition=pending">view all →</a>
+        {% endif %}
+      </div>
+      {% if pending_candidates %}
+        {% for c in pending_candidates[:5] %}
+          {% include "_card_candidate.html" %}
+        {% endfor %}
+        {% if pending_candidates|length > 5 %}
+          <a class="link" href="/candidates?disposition=pending">
+            + {{ pending_candidates|length - 5 }} more →
+          </a>
+        {% endif %}
+      {% else %}
+        <div class="mc-empty">No pending candidates.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── ACTIONS + STATE ────────────────────────────────────────── -->
+  <div>
+
+    <div class="section-title">System</div>
+    <div class="card decision-card" style="margin-bottom:1.2rem;">
+      <div class="mc-state-row">
+        <span class="dim">System mode</span>
+        <span class="mode-badge {{ sys_mode|lower }}">{{ sys_mode }}</span>
+      </div>
+      <div class="mc-state-row">
+        <span class="dim">Equity</span>
+        <span class="mono">${{ '%.0f' % equity }}</span>
+      </div>
+      <div class="mc-state-row">
+        <span class="dim">Open positions</span>
+        <span class="mono">{{ open_trades|length }}</span>
+      </div>
+      <div class="mc-state-row">
+        <span class="dim">MTD research cost</span>
+        <span class="mono">${{ '%.2f' % month_cost }} / ${{ '%.0f' % cost_ceiling }}</span>
+      </div>
+      {% if policy_state.daily_pnl is defined %}
+      <div class="mc-state-row">
+        <span class="dim">Daily P&amp;L</span>
+        <span class="mono">${{ '%.2f' % (policy_state.daily_pnl or 0) }}</span>
+      </div>
+      {% endif %}
+      {% if policy_state.portfolio_drawdown_pct is defined %}
+      <div class="mc-state-row">
+        <span class="dim">Drawdown</span>
+        <span class="mono">{{ '%.2f%%' % ((policy_state.portfolio_drawdown_pct or 0) * 100) }}</span>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="section-title">Quick actions</div>
+    <div class="action-grid" style="margin-bottom:1.2rem;">
+      {% for a in immediate_actions %}
+      <form method="POST" action="/actions/{{ a.job_id }}/run_now" class="action-row">
+        <span>
+          <strong style="font-size:0.82rem;">{{ a.label }}</strong><br>
+          <span class="hint">{{ a.hint }}</span>
+        </span>
+        <button class="btn btn-primary" type="submit">Run</button>
+      </form>
+      {% endfor %}
+      <a class="action-row link" href="/policies">
+        <span><strong style="font-size:0.82rem;">System mode override</strong><br>
+          <span class="hint">Force NORMAL / DERISK / SAFE.</span></span>
+        <span class="btn">Open →</span>
+      </a>
+      <a class="action-row link" href="/actions">
+        <span><strong style="font-size:0.82rem;">All actions</strong><br>
+          <span class="hint">Scheduler, history, manual jobs.</span></span>
+        <span class="btn">Open →</span>
+      </a>
+    </div>
+
+    <div class="section-title">Allocations</div>
+    <div class="card decision-card" style="margin-bottom:1.2rem;">
+      {% if allocations %}
+        {% for sid, pct in allocations|dictsort %}
+        <div class="mc-state-row">
+          <a class="link" href="/strategy/{{ sid }}">{{ sid }}</a>
+          <span class="mono">{{ '%.1f%%' % (pct * 100) }}</span>
+        </div>
+        {% endfor %}
+        <div style="margin-top:0.4rem;"><a class="link" href="/portfolio">Portfolio →</a></div>
+      {% else %}
+        <div class="mc-empty">No active allocations.</div>
+      {% endif %}
+    </div>
+
+    <div class="section-title">Recent events</div>
+    <div class="card decision-card">
+      {% if recent_events %}
+        {% for e in recent_events %}
+        <div class="mc-state-row" style="font-size:0.74rem;">
+          <span class="dim mono">{{ e.created_at[5:16] if e.created_at else '' }}</span>
+          <span class="mono" style="flex:1; padding:0 0.5rem;">{{ e.event_type }}</span>
+          <span class="muted" style="text-align:right; max-width:14rem; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+            {{ e.message or '' }}
+          </span>
+        </div>
+        {% endfor %}
+        <div style="margin-top:0.4rem;"><a class="link" href="/actions?kind=events">All events →</a></div>
+      {% else %}
+        <div class="mc-empty">No recent events.</div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

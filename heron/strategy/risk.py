@@ -161,25 +161,73 @@ def check_quote_freshness(quote_age_seconds, max_age=None):
     return _pass()
 
 
+def check_system_mode(conn):
+    """Reject all entries when global system mode is SAFE.
+
+    DERISK / NORMAL pass here — DERISK affects sizing, not the gate.
+    """
+    from heron.strategy.policy import current_system_mode
+    m = current_system_mode(conn)
+    if m == "SAFE":
+        return _fail("System mode SAFE: entries blocked")
+    return _pass(f"System mode {m}")
+
+
+def check_portfolio_exposure(conn, strategy_id, entry_cost, equity, mode=None):
+    """Reject if entry would exceed this strategy's portfolio-level capital budget.
+
+    Consults `compute_allocations` for the per-strategy slice. Falls back to
+    pass-through when no `strategy_id` is provided, when the strategy isn't
+    in the active allocation (PAPER/LIVE), or when there are no other active
+    strategies — the legacy `check_exposure` is the backstop in those cases.
+    """
+    if not strategy_id or mode is None:
+        return _pass("Portfolio cap: no strategy context")
+    from heron.strategy.portfolio import compute_allocations
+    allocs = compute_allocations(conn, equity, mode=mode)
+    if strategy_id not in allocs:
+        # Strategy isn't being managed at the portfolio level (probably not
+        # in PAPER/LIVE yet). Defer to legacy check_exposure backstop.
+        return _pass(f"Portfolio cap: {strategy_id} not in active allocation")
+    budget_pct = allocs[strategy_id]
+    if budget_pct <= 0:
+        return _fail(f"Portfolio cap: strategy {strategy_id} fully throttled")
+    open_trades = list_trades(conn, open_only=True, mode=mode)
+    strat_exposure = sum(
+        (t["fill_price"] or 0) * (t["fill_qty"] or 0)
+        for t in open_trades if t["strategy_id"] == strategy_id
+    )
+    new_exposure = strat_exposure + entry_cost
+    limit = equity * budget_pct
+    if new_exposure > limit:
+        return _fail(f"Portfolio cap: ${new_exposure:.0f} would exceed "
+                     f"{budget_pct:.1%} budget for {strategy_id} (limit ${limit:.0f})")
+    return _pass()
+
+
 # ── Composite Pre-Trade Check ──────────────────────
 
 def pre_trade_checks(conn, ticker, entry_price, stop_price, qty, equity,
                      quote_age_seconds, strategy_config=None,
-                     requires_same_day_exit=False, mode="live"):
+                     requires_same_day_exit=False, mode="live",
+                     strategy_id=None):
     """Run all pre-trade risk checks. Returns list of CheckResults.
 
     All checks run even if earlier ones fail — operator sees the full picture.
     `mode` ("paper" or "live") scopes per-mode counters so paper trades don't
     leak into live PDT/exposure/wash-sale state and vice versa.
+    `strategy_id` enables the portfolio-level (B1) cap; omit for legacy callers.
     """
     cfg = strategy_config or {}
     max_positions = cfg.get("max_positions", 3)
     entry_cost = entry_price * qty
 
     checks = [
+        ("system_mode", check_system_mode(conn)),
         ("wash_sale", check_wash_sale_risk(conn, ticker, mode=mode)),
         ("pdt", check_pdt_risk(conn, requires_same_day_exit, mode=mode)),
         ("exposure", check_exposure(conn, entry_cost, equity, mode=mode)),
+        ("portfolio_cap", check_portfolio_exposure(conn, strategy_id, entry_cost, equity, mode=mode)),
         ("positions", check_position_count(conn, max_positions, mode=mode)),
         ("daily_entries", check_daily_entries(conn, mode=mode)),
         ("daily_loss", check_daily_loss(conn, equity, mode=mode)),

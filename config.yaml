@@ -70,6 +70,33 @@ news_sources:
 cost:
   monthly_ceiling_usd: 45.0
 
+# Portfolio allocator (B1) — capital routing across active strategies.
+portfolio:
+  max_total_exposure: 0.80      # global cap across all strategies in a mode
+  max_per_strategy:   0.30      # hard cap per strategy regardless of config
+  tag_budget:         0.30      # cap on combined allocation per tag (crowding)
+
+# Policy engine (B2) — declarative kill-switch / de-risk rules.
+# Each rule: { id, when (Python expr over state), then (action), reason }
+# Available state vars: portfolio_drawdown_pct, daily_pnl, daily_pnl_pct,
+#   open_positions, research_cost_today, equity, mode
+# Actions: safe_mode, derisk, halt_research, block_promotions
+policy:
+  derisk_size_factor: 0.5       # qty multiplier in DERISK mode
+policies:
+  - id: drawdown_safe
+    when: "portfolio_drawdown_pct < -0.10"
+    then: "safe_mode"
+    reason: "Portfolio drawdown breach (≥10%)"
+  - id: drawdown_derisk
+    when: "portfolio_drawdown_pct < -0.05"
+    then: "derisk"
+    reason: "Portfolio drawdown ≥5% — scale down"
+  - id: cost_halt
+    when: "research_cost_today > 50"
+    then: "halt_research"
+    reason: "Daily research spend exceeded $50"
+
 audit:
   # Memorization guard — only audit events dated strictly after these cutoffs.
   local_model_cutoff: "2024-06-01"   # Qwen 2.5 cutoff (approx)

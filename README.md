@@ -41,22 +41,32 @@ For the full bootstrap (Ollama, Alpaca account, Discord, etc.) see [`Project-HER
 
 ## Quick Start
 
+The dashboard is the primary surface; the CLI is the scripting alternative. Most days you only touch the web UI.
+
 ```bash
-# Fetch today's bars and headlines for the watchlist (needs Alpaca API keys in .env)
-heron data today
-
-# Get a live quote with staleness check
-heron data quote AAPL
-
-# Journal demo — creates sample strategies, candidates, trades, wash-sale/PDT data
-heron journal demo
-
-# Journal status — summary of strategies, open trades, risk counters
-heron journal status
-
-# Launch the web dashboard (default port 5001)
+# 1. Launch the dashboard (default port 5001)
 heron dashboard                  # http://127.0.0.1:5001
-heron dashboard --port 8080      # custom port
+
+# 2. Visit /setup in the browser — first-run wizard creates your initial paper
+#    campaign, the PEAD strategy, and its deterministic baseline.
+#    (CLI equivalent: `heron init`)
+
+# 3. From the dashboard you can run research, kick off backtests, queue scheduled
+#    jobs from /actions, review proposals, promote to LIVE, etc.
+#    The home page (`/`) is **Mission Control** — Inbox / Actions / State.
+#    Decision cards (proposals, candidates, policy alerts, contamination
+#    findings) appear there with one-click approve/reject. The legacy
+#    overview lives at `/overview` as a drill-down.
+```
+
+CLI equivalents for scripting / headless ops:
+
+```bash
+heron init                       # first-run wizard (interactive). --plan for dry-run.
+heron data today                 # fetch today's bars + headlines (Alpaca keys in .env)
+heron data quote AAPL            # live quote with staleness check
+heron journal status             # summary of strategies, open trades, risk counters
+heron journal demo               # create sample strategies/candidates/trades for testing
 
 # Run tests
 python -m pytest tests/ -v

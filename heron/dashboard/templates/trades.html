@@ -8,6 +8,57 @@
   </div>
 </div>
 
+{% if summary and summary.total %}
+<div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
+  <div class="card stat">
+    <div class="stat-label">Realized PnL</div>
+    <div class="stat-value num {% if summary.total_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+      {{ "%+.2f"|format(summary.total_pnl) }}
+    </div>
+    <div class="stat-sub">across {{ summary.closed }} closed</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Win rate</div>
+    <div class="stat-value num">{{ "%.0f"|format(summary.win_rate * 100) }}%</div>
+    <div class="stat-sub">{{ summary.wins }}W / {{ summary.losses }}L</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Avg PnL</div>
+    <div class="stat-value num {% if summary.avg_pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+      {{ "%+.2f"|format(summary.avg_pnl) }}
+    </div>
+    <div class="stat-sub">per closed trade</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Avg hold</div>
+    <div class="stat-value num">{{ "%.1f"|format(summary.avg_hold_days) }}d</div>
+    <div class="stat-sub">days</div>
+  </div>
+  <div class="card stat">
+    <div class="stat-label">Open</div>
+    <div class="stat-value num">{{ summary.open }}</div>
+    <div class="stat-sub">active positions</div>
+  </div>
+</div>
+
+{% if summary.by_reason %}
+<div class="card p-3 mb-5">
+  <div class="section-title">PnL by exit reason</div>
+  <div class="grid grid-cols-2 md:grid-cols-5 gap-2 mt-2">
+    {% for reason, b in summary.by_reason.items() %}
+    <div style="padding: 0.5rem; background: var(--surface-2); border-radius: 4px;">
+      <div class="text-xs dim mono">{{ reason }}</div>
+      <div class="num text-sm {% if b.pnl >= 0 %}pnl-pos{% else %}pnl-neg{% endif %}">
+        {{ "%+.2f"|format(b.pnl) }}
+      </div>
+      <div class="text-xs dim">{{ b.n }} trade{{ "" if b.n == 1 else "s" }}</div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endif %}
+
 <div class="card overflow-hidden">
   {% if trades %}
   <table class="htable">

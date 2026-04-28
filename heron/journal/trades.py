@@ -119,6 +119,60 @@ def list_trades(conn, strategy_id=None, ticker=None, mode=None, open_only=False)
     return conn.execute(sql, params).fetchall()
 
 
+def summarize_trades(trades):
+    """Aggregate metrics for a list of trade rows.
+
+    Returns a dict with totals + a per-exit-reason breakdown. Open trades are
+    counted but excluded from PnL/win-rate stats. Used by the Trades page header.
+    """
+    out = {
+        "total": len(trades),
+        "open": 0,
+        "closed": 0,
+        "wins": 0,
+        "losses": 0,
+        "total_pnl": 0.0,
+        "win_rate": 0.0,
+        "avg_pnl": 0.0,
+        "avg_hold_days": 0.0,
+        "by_reason": {},  # {reason: {n, pnl}}
+    }
+    hold_days = []
+    for t in trades:
+        d = dict(t) if not isinstance(t, dict) else t
+        if d.get("close_price") is None:
+            out["open"] += 1
+            continue
+        out["closed"] += 1
+        pnl = d.get("pnl") or 0.0
+        out["total_pnl"] += pnl
+        if pnl > 0:
+            out["wins"] += 1
+        elif pnl < 0:
+            out["losses"] += 1
+        reason = d.get("close_reason") or "unknown"
+        bucket = out["by_reason"].setdefault(reason, {"n": 0, "pnl": 0.0})
+        bucket["n"] += 1
+        bucket["pnl"] += pnl
+        # Approximate hold by date diff if both timestamps present.
+        try:
+            from datetime import datetime
+            ca = d.get("created_at")
+            cl = d.get("closed_at") or d.get("updated_at")
+            if ca and cl:
+                a = datetime.fromisoformat(ca.replace("Z", "+00:00"))
+                b = datetime.fromisoformat(cl.replace("Z", "+00:00"))
+                hold_days.append((b - a).total_seconds() / 86400.0)
+        except (ValueError, TypeError):
+            pass
+    if out["closed"]:
+        out["win_rate"] = out["wins"] / out["closed"]
+        out["avg_pnl"] = out["total_pnl"] / out["closed"]
+    if hold_days:
+        out["avg_hold_days"] = sum(hold_days) / len(hold_days)
+    return out
+
+
 # ── Wash-Sale Queries ──────────────────────────────────
 
 def check_wash_sale(conn, ticker):

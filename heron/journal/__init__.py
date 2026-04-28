@@ -335,9 +335,21 @@ def _migrate(conn):
         conn.execute("ALTER TABLE strategies ADD COLUMN campaign_id TEXT REFERENCES campaigns(id)")
     if "template" not in cols:
         conn.execute("ALTER TABLE strategies ADD COLUMN template TEXT")
+    if "tags" not in cols:
+        conn.execute("ALTER TABLE strategies ADD COLUMN tags TEXT")  # JSON list of strings (B1)
 
     # Index requires the column to exist; create here, after the ALTER.
     conn.execute("CREATE INDEX IF NOT EXISTS idx_strategies_campaign ON strategies(campaign_id)")
+
+    bt_cols = {row["name"] for row in conn.execute("PRAGMA table_info(backtest_reports)").fetchall()}
+    if "sweep_id" not in bt_cols:
+        conn.execute("ALTER TABLE backtest_reports ADD COLUMN sweep_id TEXT")
+    if "walkforward_id" not in bt_cols:
+        conn.execute("ALTER TABLE backtest_reports ADD COLUMN walkforward_id TEXT")
+    if "regime_metrics_json" not in bt_cols:
+        conn.execute("ALTER TABLE backtest_reports ADD COLUMN regime_metrics_json TEXT")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_backtest_sweep ON backtest_reports(sweep_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_backtest_walkforward ON backtest_reports(walkforward_id)")
 
     orphan_count = conn.execute(
         "SELECT COUNT(*) AS n FROM strategies WHERE campaign_id IS NULL"

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}First-run setup — HERON{% endblock %}
+{% block content %}
+<div class="max-w-3xl mx-auto py-8 px-4 space-y-6">
+
+  <div>
+    <h1 class="text-3xl font-semibold mb-2">First-run setup</h1>
+    <p class="text-sm text-zinc-400">
+      Bootstrap your initial paper campaign with a PEAD strategy and its deterministic baseline.
+      You can always add more campaigns and strategies later. CLI equivalent: <code class="text-zinc-300">heron init</code>.
+    </p>
+  </div>
+
+  {% if already and not applied %}
+    <div class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+      <p class="font-medium text-amber-300">Setup already complete.</p>
+      <p class="text-zinc-300 mt-1">
+        The journal already has campaigns/strategies. Re-running setup is a no-op
+        (we won't overwrite real history). Visit
+        <a class="underline" href="{{ url_for('strategies_view') }}">Strategies</a>
+        or <a class="underline" href="{{ url_for('campaigns_view') }}">Campaigns</a>.
+      </p>
+    </div>
+  {% endif %}
+
+  {% if applied %}
+    <div class="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm space-y-1">
+      <p class="font-medium text-emerald-300">Bootstrapped.</p>
+      <p>Campaign <code>{{ applied.campaign_id }}</code> created with {{ applied.strategy_ids|length }} strategies.</p>
+      <p>
+        Next:
+        <a class="underline" href="{{ url_for('strategies_view') }}">Strategies</a> ·
+        <a class="underline" href="{{ url_for('actions_view') }}">Actions</a> ·
+        <a class="underline" href="{{ url_for('campaigns_view') }}">Campaigns</a>.
+      </p>
+    </div>
+  {% endif %}
+
+  <form method="POST" action="{{ url_for('setup_view') }}" class="space-y-6 rounded-lg border border-zinc-800 p-5 bg-zinc-900/40">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Starting capital (USD)</span>
+        <input name="capital" type="number" step="0.01" min="1" value="{{ form.capital }}"
+               class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Campaign name</span>
+        <input name="campaign_name" type="text" value="{{ form.campaign_name }}"
+               class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Research cadence</span>
+        <select name="cadence" class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
+          <option value="premarket_only" {% if form.cadence == 'premarket_only' %}selected{% endif %}>Premarket only</option>
+          <option value="premarket_eod"  {% if form.cadence == 'premarket_eod'  %}selected{% endif %}>Premarket + EOD debrief</option>
+          <option value="full"           {% if form.cadence == 'full'           %}selected{% endif %}>Full (premarket + executor cycle + EOD + health)</option>
+        </select>
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Max capital % per trade</span>
+        <input name="max_capital_pct" type="number" step="0.01" min="0.01" max="1.0" value="{{ form.max_capital_pct }}"
+               class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Max concurrent positions</span>
+        <input name="max_positions" type="number" min="1" max="20" value="{{ form.max_positions }}"
+               class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
+      </label>
+      <label class="block">
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Drawdown budget</span>
+        <input name="drawdown_budget_pct" type="number" step="0.01" min="0.01" max="0.99" value="{{ form.drawdown_budget_pct }}"
+               class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
+      </label>
+    </div>
+
+    <div class="flex gap-2 pt-2">
+      <button name="action" value="plan" type="submit"
+              class="px-4 py-2 rounded border border-zinc-700 hover:border-zinc-500 text-sm">
+        Preview plan
+      </button>
+      {% if not already %}
+        <button name="action" value="apply" type="submit"
+                onclick="return confirm('Create the campaign + strategies now?');"
+                class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">
+          Apply
+        </button>
+      {% else %}
+        <button disabled class="px-4 py-2 rounded bg-zinc-800 text-zinc-500 text-sm cursor-not-allowed">
+          Apply (locked — already set up)
+        </button>
+      {% endif %}
+    </div>
+  </form>
+
+  {% if plan %}
+    <div class="rounded-lg border border-zinc-800 p-5 bg-zinc-900/40 space-y-4">
+      <h2 class="text-lg font-semibold">Plan preview</h2>
+
+      <div>
+        <h3 class="text-xs uppercase tracking-wide text-zinc-400 mb-2">Campaign</h3>
+        <div class="text-sm font-mono">
+          {{ plan.campaign.id }} — {{ plan.campaign.name }}
+          <span class="text-zinc-500">({{ plan.campaign.mode }}, ${{ "%.2f"|format(plan.campaign.capital_allocation_usd) }},
+          {{ plan.campaign.paper_window_days }}d window, target state {{ plan.campaign.state }})</span>
+        </div>
+      </div>
+
+      <div>
+        <h3 class="text-xs uppercase tracking-wide text-zinc-400 mb-2">Strategies</h3>
+        <ul class="text-sm space-y-1 font-mono">
+          {% for s in plan.strategies %}
+            <li>
+              {{ s.id }} — {{ s.name }}
+              {% if s.is_baseline %}<span class="text-zinc-500">(baseline of {{ s.parent_id }})</span>{% endif %}
+              <span class="text-zinc-500">→ {{ s.state_target }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4 text-sm">
+        <div>
+          <h3 class="text-xs uppercase tracking-wide text-zinc-400 mb-2">Guardrails</h3>
+          <div>max_capital_pct: <code>{{ plan.guardrails.max_capital_pct }}</code></div>
+          <div>max_positions: <code>{{ plan.guardrails.max_positions }}</code></div>
+          <div>drawdown_budget_pct: <code>{{ plan.guardrails.drawdown_budget_pct }}</code></div>
+        </div>
+        <div>
+          <h3 class="text-xs uppercase tracking-wide text-zinc-400 mb-2">Cadence</h3>
+          <div>preset: <code>{{ plan.cadence.preset }}</code></div>
+          <div>jobs hint: <code>{{ plan.cadence.jobs|join(", ") }}</code></div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</div>
+{% endblock %}

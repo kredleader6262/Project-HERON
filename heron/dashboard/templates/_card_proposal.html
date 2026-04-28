@@ -1,0 +1,27 @@
+<div class="card decision-card" data-kind="proposal">
+  <div class="card-head">
+    <span class="micro">Proposal</span>
+    <h3>{{ p.id }} — {{ p.template_id or 'unknown template' }}</h3>
+  </div>
+  <div class="card-body">
+    <div class="muted" style="font-size:0.78rem;">
+      {% if p.hypothesis %}{{ p.hypothesis[:140] }}{% if p.hypothesis|length > 140 %}…{% endif %}{% else %}—{% endif %}
+    </div>
+    <div class="dim mono" style="font-size:0.7rem; margin-top:0.4rem;">
+      max_capital={{ '%.0f%%' % ((p.max_capital_pct or 0) * 100) }}
+      · dd_budget={{ '%.0f%%' % ((p.drawdown_budget_pct or 0) * 100) }}
+    </div>
+  </div>
+  <div class="card-actions">
+    <form method="POST" action="/strategy/{{ p.id }}/approve" style="display:inline;">
+      <input type="hidden" name="reason" value="Approved via Mission Control">
+      <button class="btn btn-primary" type="submit">Approve → PAPER</button>
+    </form>
+    <form method="POST" action="/strategy/{{ p.id }}/reject" style="display:inline;"
+          onsubmit="return confirm('Reject {{ p.id }}?');">
+      <input type="hidden" name="reason" value="Rejected via Mission Control">
+      <button class="btn" type="submit">Reject</button>
+    </form>
+    <a class="link" href="/strategy/{{ p.id }}">Details →</a>
+  </div>
+</div>

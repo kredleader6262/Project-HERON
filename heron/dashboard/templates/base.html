@@ -6,6 +6,7 @@
   <title>{% if mode == 'live' %}[LIVE] {% endif %}{% block title %}HERON{% endblock %}</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><circle cx='8' cy='8' r='6' fill='%23{{ mode_accent[1:] }}'/></svg>">
@@ -455,7 +456,8 @@
     <div class="inner">
       <a href="/" class="wordmark">HERON</a>
       <nav class="nav">
-        <a href="/"           class="{% if active_path == '/' %}active{% endif %}">Overview</a>
+        <a href="/"           class="{% if active_path == '/' %}active{% endif %}">Mission</a>
+        <a href="/overview"   class="{% if active_path == '/overview' %}active{% endif %}">Overview</a>
         <a href="/campaigns"  class="{% if active_path.startswith('/campaign') %}active{% endif %}">Campaigns</a>
         <a href="/strategies" class="{% if active_path.startswith('/strateg') %}active{% endif %}">Strategies</a>
         <a href="/proposals"  class="{% if active_path == '/proposals' %}active{% endif %}">
@@ -468,11 +470,12 @@
         <a href="/agents"     class="{% if active_path == '/agents' %}active{% endif %}">Agents</a>
         <a href="/audits"     class="{% if active_path == '/audits' %}active{% endif %}">Audits</a>
         <a href="/backtests"  class="{% if active_path.startswith('/backtests') %}active{% endif %}">Backtests</a>
+        <a href="/data/earnings" class="{% if active_path.startswith('/data') %}active{% endif %}">Data</a>
+        <a href="/portfolio"  class="{% if active_path == '/portfolio' %}active{% endif %}">Portfolio</a>
+        <a href="/policies"   class="{% if active_path.startswith('/policies') %}active{% endif %}">Policies</a>
         <a href="/costs"      class="{% if active_path == '/costs' %}active{% endif %}">Costs</a>
         <a href="/resilience" class="{% if active_path == '/resilience' %}active{% endif %}">Resilience</a>
-        <a href="/scheduler"  class="{% if active_path == '/scheduler' %}active{% endif %}">Scheduler</a>
-        <a href="/health"     class="{% if active_path == '/health' %}active{% endif %}">Health</a>
-        <a href="/glossary"   class="{% if active_path == '/glossary' %}active{% endif %}">Glossary</a>
+        <a href="/actions"    class="{% if active_path == '/actions' or active_path == '/scheduler' %}active{% endif %}">Actions</a>
       </nav>
     </div>
   </div>
@@ -553,5 +556,14 @@
       tick(); setInterval(tick, 1000);
     })();
   </script>
+
+  <footer style="border-top: 1px solid var(--line); padding: 1rem 1.25rem; margin-top: 2rem; color: var(--muted); font-size: 0.75rem; display: flex; gap: 1rem; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+    <span>HERON — local operator dashboard</span>
+    <span>
+      <a href="/setup" class="link" style="margin-right: 0.75rem;">Setup</a>
+      <a href="/glossary" class="link" style="margin-right: 0.75rem;">Glossary</a>
+      <a href="/resilience#health" class="link">Health</a>
+    </span>
+  </footer>
 </body>
 </html>

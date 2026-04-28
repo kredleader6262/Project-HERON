@@ -74,7 +74,35 @@ def run_executor_cycle(conn, *, mode="paper", broker=None):
         "exits": 0,
         "entries": 0,
         "errors": [],
+        "system_mode": "NORMAL",
+        "policy_actions": [],
     }
+
+    # B2: evaluate policies first; transition global system mode if needed.
+    try:
+        from heron.strategy.policy import (
+            assemble_state, evaluate_policies, resolve_mode,
+            current_system_mode, set_system_mode,
+        )
+        try:
+            equity = executor.get_equity()
+        except Exception:  # noqa: BLE001
+            equity = None
+        state = assemble_state(conn, mode=mode, equity=equity)
+        actions = evaluate_policies(state)
+        prior = current_system_mode(conn)
+        target = resolve_mode(actions, prior_mode="NORMAL")  # rules drive transitions
+        if target != prior:
+            set_system_mode(conn, target, reason="policy auto",
+                            operator="cycle",
+                            triggered_by=[a["id"] for a in actions])
+        summary["system_mode"] = target
+        summary["policy_actions"] = actions
+        if target == "SAFE":
+            log.warning("system mode SAFE — entries blocked, exits/reconcile only")
+    except Exception as e:  # noqa: BLE001
+        log.exception(f"policy evaluation failed: {e}")
+        summary["errors"].append(f"policy: {e}")
 
     campaigns = [c for c in list_campaigns(conn, mode=mode, state="ACTIVE")]
     summary["campaigns"] = len(campaigns)

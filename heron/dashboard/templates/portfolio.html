@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="flex items-center gap-3 mb-4">
+  <h1 class="text-2xl font-bold">Portfolio</h1>
+  <span class="dim text-sm">Per-strategy capital budgets after parity / drawdown / crowding adjustments.</span>
+</div>
+
+<div class="card p-4 mb-4">
+  <div class="flex flex-wrap gap-6 text-sm">
+    <div><span class="dim">Mode</span><br><strong class="mono">{{ mode }}</strong></div>
+    <div><span class="dim">Equity</span><br><strong class="mono">${{ "%.0f"|format(equity) }}</strong></div>
+    <div><span class="dim">Total allocated</span><br>
+      <strong class="mono">{{ "%.1f"|format(total_pct * 100) }}%</strong>
+      <span class="dim">/ {{ "%.0f"|format(max_total * 100) }}% cap</span></div>
+    <div><span class="dim">System mode</span><br>
+      <strong class="mono">{{ system_mode }}</strong>
+      <a class="link text-xs ml-2" href="/policies">manage</a></div>
+  </div>
+</div>
+
+<div class="section-title">Allocations</div>
+<div class="card overflow-hidden">
+  {% if not allocations %}
+    <div class="p-4 dim">No active strategies in {{ mode }} mode.</div>
+  {% else %}
+  <table class="htable">
+    <thead><tr>
+      <th>Strategy</th><th>State</th><th>Tags</th>
+      <th class="r">Base cap</th><th class="r">Parity</th>
+      <th class="r">Drawdown</th><th class="r">Allocated</th>
+      <th class="r">$ budget</th>
+    </tr></thead>
+    <tbody>
+    {% for a in allocations %}
+      <tr>
+        <td class="mono"><a class="link" href="/strategy/{{ a.id }}">{{ a.id }}</a></td>
+        <td><span class="pill pill-{{ a.state|lower }}">{{ a.state }}</span></td>
+        <td class="mono text-xs">{{ a.tags|join(", ") if a.tags else "—" }}</td>
+        <td class="r num">{{ "%.1f"|format(a.base_pct * 100) }}%</td>
+        <td class="r num">{{ "%.2f"|format(a.parity_factor) }}</td>
+        <td class="r num">{{ "%.2f"|format(a.drawdown_factor) }}</td>
+        <td class="r num"><strong>{{ "%.1f"|format(a.alloc_pct * 100) }}%</strong></td>
+        <td class="r num">${{ "%.0f"|format(a.alloc_pct * equity) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="text-xs dim mt-3">
+  Pipeline: base × parity_factor × drawdown_factor → tag-crowding cap → global cap.
+  Backstop: legacy <code class="mono">check_exposure</code> (max {{ "%.0f"|format(max_total * 100) }}% combined).
+  CLI: <code class="mono">heron policy status</code>.
+</div>
+{% endblock %}
