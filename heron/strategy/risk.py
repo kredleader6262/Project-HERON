@@ -51,7 +51,7 @@ def check_wash_sale_risk(conn, ticker, mode="live"):
     """
     if mode == "paper":
         return _pass("Paper mode, wash-sale N/A")
-    lots = check_wash_sale(conn, ticker)
+    lots = check_wash_sale(conn, ticker, mode=mode)
     if lots:
         total_loss = sum(l["loss_amount"] for l in lots)
         return _fail(f"Wash-sale: {len(lots)} active lot(s) for {ticker} family, "
@@ -68,8 +68,8 @@ def check_pdt_risk(conn, requires_same_day_exit=False, limit=3, mode="live"):
         return _pass("Paper mode, PDT N/A")
     if not requires_same_day_exit:
         return _pass("Swing trade, PDT N/A")
-    if not can_daytrade(conn, limit=limit):
-        count = get_pdt_count(conn, mode="live")
+    if not can_daytrade(conn, limit=limit, mode=mode):
+        count = get_pdt_count(conn, mode=mode)
         return _fail(f"PDT: {count} day-trades in window, limit {limit}")
     return _pass()
 

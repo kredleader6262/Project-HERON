@@ -16,11 +16,11 @@ from datetime import datetime, timezone, timedelta
 from heron.config import (
     CLAUDE_HAIKU_MODEL, CLAUDE_KNOWLEDGE_CUTOFF,
     TRUST_SCORE_WINDOW_DAYS, TRUST_SCORE_MIN_SAMPLES,
-    POST_MORTEM_DAILY_LIMIT, MONTHLY_COST_CEILING,
+    POST_MORTEM_DAILY_LIMIT,
 )
 from heron.data.sanitize import sanitize
 from heron.journal.candidates import get_candidate
-from heron.journal.ops import log_audit, log_cost, get_monthly_cost, get_audits
+from heron.journal.ops import log_audit, log_cost, get_audits
 from heron.research.claude import call
 from heron.research.progress import Spinner
 from heron.research.cost_guard import check_budget

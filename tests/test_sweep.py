@@ -1,27 +1,14 @@
 """Tests for parameter sweep."""
 
 import json
-import sqlite3
 
 import pytest
 
 from heron.backtest.sweep import (
     SWEEPABLE_AXES, expand_grid, parse_axes, run_sweep,
 )
-from heron.journal import init_journal
 from heron.journal.strategies import create_strategy
 from heron.strategy.pead import PEAD_CONFIG
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "j.db"))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def test_expand_grid_cartesian():
     out = expand_grid({"a": [1, 2], "b": ["x", "y"]})

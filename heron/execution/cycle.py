@@ -11,6 +11,7 @@ import logging
 
 from heron.journal.campaigns import list_campaigns, get_campaign_strategies
 from heron.journal.candidates import list_candidates, dispose_candidate
+from heron.journal.ops import log_event
 from heron.journal.strategies import list_strategies
 from heron.strategy.templates import get_template, instantiate_from_template
 
@@ -21,7 +22,7 @@ def _instantiate_strategy(row):
     """Build a BaseStrategy instance from a strategies row.
 
     Falls back to the PEAD template if no template column is set (legacy rows).
-    Returns None if the row's template is unknown — caller skips it.
+    Returns (strategy, None) or (None, skip_reason).
     """
     template_name = row["template"] if "template" in row.keys() and row["template"] else None
     if template_name is None:
@@ -29,13 +30,11 @@ def _instantiate_strategy(row):
         if row["id"].startswith("pead"):
             template_name = "pead"
         else:
-            log.warning(f"strategy {row['id']} has no template; skipping")
-            return None
+            return None, "missing template"
     try:
         template = get_template(template_name)
     except KeyError:
-        log.warning(f"strategy {row['id']}: unknown template {template_name!r}; skipping")
-        return None
+        return None, f"unknown template {template_name!r}"
 
     overrides = {}
     if row["config"]:
@@ -50,7 +49,19 @@ def _instantiate_strategy(row):
         kwargs["is_llm_variant"] = not row["is_baseline"]
     return instantiate_from_template(
         template_name, row["id"], config_overrides=overrides, **kwargs,
-    )
+    ), None
+
+
+def _record_strategy_skip(conn, row, reason, summary):
+    message = f"{row['id']}: {reason}"
+    log.warning(f"strategy {message}; skipping")
+    summary["skipped"].append(message)
+    existing = conn.execute(
+        "SELECT id FROM events WHERE event_type='strategy_skipped' AND message=? LIMIT 1",
+        (message,),
+    ).fetchone()
+    if not existing:
+        log_event(conn, "strategy_skipped", message, severity="warn", source="executor_cycle")
 
 
 def run_executor_cycle(conn, *, mode="paper", broker=None):
@@ -74,6 +85,7 @@ def run_executor_cycle(conn, *, mode="paper", broker=None):
         "exits": 0,
         "entries": 0,
         "errors": [],
+        "skipped": [],
         "system_mode": "NORMAL",
         "policy_actions": [],
     }
@@ -129,8 +141,9 @@ def run_executor_cycle(conn, *, mode="paper", broker=None):
 
     for row in rows:
         try:
-            strat = _instantiate_strategy(row)
-            if strat is None:
+            strat, skip_reason = _instantiate_strategy(row)
+            if skip_reason:
+                _record_strategy_skip(conn, row, skip_reason, summary)
                 continue
 
             # 1. Exits first — never miss a stop

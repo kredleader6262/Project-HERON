@@ -1,34 +1,16 @@
 """Tests for heron.research — Ollama client, classifier, candidate generator, orchestrator."""
 
 import json
-import sqlite3
 from unittest.mock import patch, MagicMock
 
 import pytest
-
-from heron.journal import init_journal
 
 
 # ── Fixtures ──────────────────────────────────────
 
 @pytest.fixture
-def journal_conn(tmp_path):
-    db = tmp_path / "test_journal.db"
-    conn = sqlite3.connect(str(db))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    init_journal(conn)
-    # Seed a strategy for candidates
-    now = "2026-04-19T00:00:00+00:00"
-    conn.execute(
-        """INSERT INTO strategies (id, name, state, max_capital_pct, max_positions,
-           drawdown_budget_pct, min_hold_days, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("pead_v1", "PEAD Test", "PAPER", 0.25, 3, 0.08, 2, now, now),
-    )
-    conn.commit()
-    return conn
+def journal_conn(research_pead_v1_conn):
+    return research_pead_v1_conn
 
 
 def _mock_ollama_response(parsed_json, tokens_in=100, tokens_out=50):
@@ -315,6 +297,27 @@ class TestCandidateGenerator:
         ]
         ids = generate_candidates(journal_conn, cls, strategy_id="pead_v1")
         assert len(ids) == 0  # blocked by cost ceiling
+
+    @patch("heron.research.candidates.check_budget")
+    def test_generate_candidates_uses_central_cost_guard(self, mock_budget, journal_conn):
+        from heron.research.candidates import generate_candidates
+
+        mock_budget.return_value = {
+            "research_allowed": False,
+            "reason": "projected $60.00 > ceiling $45.00",
+            "mtd": 20.0,
+        }
+        cls = [{
+            "article_id": "test:6",
+            "relevant": True,
+            "relevance_score": 0.9,
+            "sentiment": "positive",
+            "sentiment_score": 0.8,
+            "tickers": ["AAPL"],
+            "category": "earnings",
+            "rationale": "beat",
+        }]
+        assert generate_candidates(journal_conn, cls, strategy_id="pead_v1") == []
 
     def test_score_computation(self):
         from heron.research.candidates import _compute_score

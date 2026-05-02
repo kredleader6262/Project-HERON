@@ -1,1 +1,8 @@
+# User-Reported Bugs
+
+Use this as the lightweight intake list for bugs reported outside GitHub issues.
+
+Format:
+- [ ] Short title — source/date — expected vs actual — affected command/page — notes
+
 To implement:

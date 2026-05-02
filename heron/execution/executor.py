@@ -8,7 +8,7 @@ Flow:
 2. Quote freshness check (stale = abort)
 3. Submit order via broker adapter (idempotent)
 4. Record trade in journal
-5. Virtual stop/target polling (30s during market hours)
+5. Virtual stop/target checks on the supervisor's executor-cycle cadence
 """
 
 import logging
@@ -180,7 +180,7 @@ class Executor:
     def check_exits(self, strategy):
         """Poll all open trades for a strategy and check exit conditions.
 
-        Called on a 30-second interval during market hours.
+        Called by the runtime executor cycle during market hours.
         strategy: BaseStrategy instance with should_exit() method.
         """
         open_trades = list_trades(self.conn, strategy_id=strategy.strategy_id, open_only=True)

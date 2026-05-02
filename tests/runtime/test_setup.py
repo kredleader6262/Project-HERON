@@ -1,25 +1,11 @@
 """Tests for first-run setup wizard (heron/runtime/setup.py)."""
 
-import sqlite3
 import pytest
 
-from heron.journal import init_journal
 from heron.runtime.setup import (
     plan_initial_setup, apply_initial_setup, is_already_setup,
     SetupAlreadyDoneError,
 )
-
-
-@pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test.db"
-    c = sqlite3.connect(str(db))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def test_plan_validates_inputs():
     with pytest.raises(ValueError):

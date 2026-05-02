@@ -4,22 +4,9 @@ We avoid actually starting APScheduler in most tests — focus on the
 journaling, command consumption, and run_once flow.
 """
 
-import sqlite3
 import pytest
 
-from heron.journal import init_journal
 from heron.runtime.supervisor import Supervisor, request_command
-
-
-@pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test.db"
-    c = sqlite3.connect(str(db))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
 
 
 def _ok_job(conn, mode):

@@ -1,13 +1,11 @@
 """Tests for M8 — Claude API client, thesis writer, escalation logic."""
 
 import json
-import sqlite3
 from unittest.mock import patch, MagicMock
 import random
 
 import pytest
 
-from heron.journal import init_journal
 from heron.journal.candidates import create_candidate, get_candidate
 from heron.journal.ops import get_monthly_cost, log_cost
 
@@ -15,22 +13,8 @@ from heron.journal.ops import get_monthly_cost, log_cost
 # ── Fixtures ──────────────────────────────────────
 
 @pytest.fixture
-def journal_conn(tmp_path):
-    db = tmp_path / "test_journal.db"
-    conn = sqlite3.connect(str(db))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    init_journal(conn)
-    now = "2026-04-19T00:00:00+00:00"
-    conn.execute(
-        """INSERT INTO strategies (id, name, state, max_capital_pct, max_positions,
-           drawdown_budget_pct, min_hold_days, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("pead_v1", "PEAD Test", "PAPER", 0.25, 3, 0.08, 2, now, now),
-    )
-    conn.commit()
-    return conn
+def journal_conn(research_pead_v1_conn):
+    return research_pead_v1_conn
 
 
 @pytest.fixture
@@ -297,6 +281,23 @@ class TestEscalation:
 
         result = escalate_candidates(journal_conn, [cid])
         assert result["status"] == "cost_halted"
+        mock_thesis.assert_not_called()
+
+    @patch("heron.research.escalation.check_budget")
+    @patch("heron.research.escalation.write_thesis")
+    def test_escalate_uses_central_cost_guard(self, mock_thesis, mock_budget, journal_conn):
+        from heron.research.escalation import escalate_candidates
+
+        mock_budget.return_value = {
+            "research_allowed": False,
+            "reason": "projected $60.00 > ceiling $45.00",
+            "mtd": 20.0,
+        }
+        cid = create_candidate(journal_conn, "pead_v1", "AAPL", local_score=0.8,
+                               context_json='{}')
+        result = escalate_candidates(journal_conn, [cid])
+        assert result["status"] == "cost_halted"
+        assert result["reason"].startswith("projected")
         mock_thesis.assert_not_called()
 
     @patch("heron.research.escalation.call")

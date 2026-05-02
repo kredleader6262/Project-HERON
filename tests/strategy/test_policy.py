@@ -2,20 +2,10 @@
 
 import pytest
 
-from heron.journal import init_journal, get_journal_conn
 from heron.strategy.policy import (
     evaluate_policies, resolve_mode, current_system_mode, set_system_mode,
-    derisk_qty, VALID_MODES,
+    derisk_qty, VALID_MODES, assemble_state,
 )
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = get_journal_conn(str(tmp_path / "test.db"))
-    init_journal(c)
-    yield c
-    c.close()
-
 
 # ── Pure rule evaluator ──
 
@@ -48,6 +38,20 @@ def test_no_builtins_in_eval():
     rules = [{"id": "evil", "when": "__import__('os')", "then": "safe_mode"}]
     actions = evaluate_policies({}, policies=rules)
     assert actions[0]["action"] == "error"
+
+
+def test_assemble_state_uses_cost_guard_mtd(conn):
+    from heron.journal.ops import log_cost
+
+    log_cost(conn, "claude_sonnet", 1000, 500, 55.0, task="test")
+    state = assemble_state(conn, mode="paper", equity=1000.0)
+    assert state["research_cost_today"] == 55.0
+    assert state["research_cost_mtd"] == 55.0
+
+    rules = [{"id": "cost_halt", "when": "research_cost_today > 50",
+              "then": "halt_research"}]
+    actions = evaluate_policies(state, policies=rules)
+    assert actions[0]["action"] == "halt_research"
 
 
 # ── Mode resolution ──

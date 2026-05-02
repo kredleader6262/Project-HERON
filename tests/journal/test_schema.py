@@ -1,24 +1,14 @@
 """Tests for journal schema initialization."""
 
 import sqlite3
-import pytest
-from heron.journal import get_journal_conn, init_journal
+
+from heron.journal import init_journal
 
 EXPECTED_TABLES = {
     "strategies", "strategy_state_log", "candidates", "trades",
     "wash_sale_lots", "pdt_daytrades", "audits", "cost_tracking",
     "reviews", "events",
 }
-
-
-@pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test_journal.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def test_all_tables_created(conn):
     tables = {r[0] for r in conn.execute(

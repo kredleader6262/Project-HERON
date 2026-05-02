@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -23,6 +24,42 @@ def cli():
     """HERON — Hypothesis-driven Execution with Research, Observation, and Notation."""
     from heron.logging_setup import setup_logging
     setup_logging()
+
+
+def _dashboard_lan_urls(port):
+    ips = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            ips.append(sock.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        ips.extend(socket.gethostbyname_ex(socket.gethostname())[2])
+    except OSError:
+        pass
+    seen = []
+    for ip in ips:
+        if ip and not ip.startswith("127.") and ip not in seen:
+            seen.append(ip)
+    return [f"http://{ip}:{port}" for ip in seen]
+
+
+def _echo_dashboard_urls(host, port):
+    if host == "0.0.0.0":
+        urls = _dashboard_lan_urls(port)
+        click.echo(f"Starting HERON dashboard on all interfaces, port {port}")
+        click.echo(f"Accessible locally via: http://127.0.0.1:{port}")
+        if urls:
+            click.echo(f"Accessible via: {urls[0]}")
+            for url in urls[1:]:
+                click.echo(f"Other detected address: {url}")
+        else:
+            click.echo("Could not detect a LAN IP. Run `ipconfig` and use this computer's IPv4 address.")
+        return
+    click.echo(f"Starting HERON dashboard at http://{host}:{port}")
+    if host in ("127.0.0.1", "localhost"):
+        click.echo("Phone/LAN access needs `--lan` or `--host 0.0.0.0`.")
 
 
 @cli.group()
@@ -497,13 +534,18 @@ def inbox(state):
 
 @cli.command()
 @click.option("--host", default="127.0.0.1", help="Bind address.")
+@click.option("--lan", is_flag=True, help="Listen on all LAN interfaces (0.0.0.0).")
 @click.option("--port", default=5001, help="Port number.")
 @click.option("--debug", is_flag=True, help="Enable Flask debug mode.")
-def dashboard(host, port, debug):
+def dashboard(host, lan, port, debug):
     """Launch the HERON web dashboard."""
     from heron.dashboard import create_app
+    if lan:
+        if host not in ("127.0.0.1", "0.0.0.0"):
+            raise click.UsageError("Use either --lan or --host, not both.")
+        host = "0.0.0.0"
     app = create_app()
-    click.echo(f"Starting HERON dashboard at http://{host}:{port}")
+    _echo_dashboard_urls(host, port)
     app.run(host=host, port=port, debug=debug)
 
 

@@ -22,6 +22,13 @@ Five layers, strict interfaces. **Each layer can be swapped without touching the
 
 If you're unsure which layer something belongs to, check `Project-HERON.md` Section 4.
 
+Quick placement checks:
+- Risk/order/account rules go in Strategy or Execution, with trading-safety tests.
+- LLM calls, news interpretation, proposals, theses, audits, and cost gates stay in Research.
+- Operator decisions persist through Journal helpers; dashboard and CLI are thin wrappers.
+- Recurring work is a Runtime job plus an Actions dashboard command if operator-facing.
+- New strategy templates register in `heron.strategy.templates`; never accept dynamic user code in the execution path.
+
 ## UI-First Operation
 
 **The dashboard is the primary operator surface.** The user will run almost everything through the web UI. The CLI exists for automation, scripting, and emergency access — not as the daily driver.
@@ -42,7 +49,7 @@ When in doubt: if you wrote CLI-only, you wrote half the feature.
 
 - **LLM never decides entries/exits/sizing.** LLM researches and recommends. Deterministic code executes.
 - **Wash-sale and PDT pre-checks** before any order. No exceptions, no "we'll add it later."
-- **Idempotent order submission.** `client_order_id` = `{strategy}_{utc_ms}_{ticker}_{side}`. Query before resubmit.
+- **Idempotent order submission.** Use `make_entry_order_id(strategy, candidate_id, ticker, side)` and `make_close_order_id(strategy, trade_id, ticker, side)`. Treat broker IDs as opaque; never parse or hand-build them.
 - **Stale-quote kill switch.** Never submit when last quote > 10 seconds old.
 - **Secrets never in repo, never in logs.** `.env` with 0600 permissions or OS keychain.
 - **Operator-gated.** No code autonomously increases risk exposure. Agents recommend; operator decides.

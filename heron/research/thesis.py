@@ -9,10 +9,9 @@ Takes shortlisted candidates (already classified locally) and:
 import json
 import logging
 
-from heron.config import MONTHLY_COST_CEILING
 from heron.data.sanitize import sanitize
 from heron.journal.candidates import get_candidate
-from heron.journal.ops import log_cost, get_monthly_cost
+from heron.journal.ops import log_cost
 from heron.research.claude import call
 from heron.research.progress import Spinner
 

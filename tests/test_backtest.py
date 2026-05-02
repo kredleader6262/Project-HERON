@@ -1,7 +1,6 @@
 """Tests for M13 — deterministic backtester."""
 
 import json
-import sqlite3
 from datetime import datetime, timedelta
 
 import pytest
@@ -12,19 +11,8 @@ from heron.backtest.costs import (
 )
 from heron.backtest.report import check_contamination
 from heron.backtest.seeders import synthetic_pead_candidates
-from heron.journal import init_journal
 from heron.journal.strategies import create_strategy
 from heron.strategy.pead import PEADStrategy, PEAD_UNIVERSE
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "j.db"))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
 
 
 def _synthetic_bars(tickers, n_days=200, start_price=100.0, drift=0.001):

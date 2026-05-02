@@ -175,12 +175,22 @@ def summarize_trades(trades):
 
 # ── Wash-Sale Queries ──────────────────────────────────
 
-def check_wash_sale(conn, ticker):
+def check_wash_sale(conn, ticker, mode=None):
     """Check if buying this ticker (or family member) would trigger wash-sale.
+
+    `mode` optionally filters lots by the originating trade mode. Use
+    mode="live" for pre-trade tax checks so paper losses don't block live entries.
     Returns list of active wash-sale lots in the 30-day window.
     """
     family = _ticker_family(ticker)
     now = _now()
+    if mode:
+        return conn.execute(
+            "SELECT w.* FROM wash_sale_lots w JOIN trades t ON t.id = w.trade_id "
+            "WHERE w.ticker_family=? AND w.window_end > ? AND t.mode=? "
+            "ORDER BY w.closed_at DESC",
+            (family, now, mode),
+        ).fetchall()
     return conn.execute(
         "SELECT * FROM wash_sale_lots WHERE ticker_family=? AND window_end > ? ORDER BY closed_at DESC",
         (family, now),
@@ -231,6 +241,6 @@ def get_pdt_count(conn, lookback_days=5, mode=None):
     return row["cnt"]
 
 
-def can_daytrade(conn, limit=3):
+def can_daytrade(conn, limit=3, mode=None):
     """True if another day-trade is allowed under PDT limit."""
-    return get_pdt_count(conn) < limit
+    return get_pdt_count(conn, mode=mode) < limit

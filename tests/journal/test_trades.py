@@ -1,9 +1,6 @@
 """Tests for trades, wash-sale lots, PDT tracking."""
 
 import pytest
-from datetime import datetime, timezone, timedelta
-from heron.journal import get_journal_conn, init_journal
-from heron.journal.strategies import create_strategy
 from heron.journal.trades import (
     create_trade, fill_trade, close_trade, get_trade, list_trades,
     check_wash_sale, get_wash_sale_exposure, get_pdt_count, can_daytrade,
@@ -12,13 +9,8 @@ from heron.journal.trades import (
 
 
 @pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test_trades.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    create_strategy(c, "pead", "PEAD")
-    yield c
-    c.close()
+def conn(pead_conn):
+    return pead_conn
 
 
 # ── Trade lifecycle ──────────────────────────────
@@ -98,6 +90,18 @@ def test_wash_sale_exposure(conn):
     assert len(exposure) >= 1
 
 
+def test_wash_sale_query_mode_filter(conn):
+    paper = create_trade(conn, "pead", "AAPL", "buy", "paper", 10)
+    fill_trade(conn, paper, 150.00)
+    close_trade(conn, paper, 140.00, "stop")
+    assert check_wash_sale(conn, "AAPL", mode="live") == []
+
+    live = create_trade(conn, "pead", "AAPL", "buy", "live", 10)
+    fill_trade(conn, live, 150.00)
+    close_trade(conn, live, 140.00, "stop")
+    assert len(check_wash_sale(conn, "AAPL", mode="live")) == 1
+
+
 def test_ticker_family():
     assert _ticker_family("SPY") == _ticker_family("VOO")
     assert _ticker_family("AAPL") == "AAPL"
@@ -125,6 +129,16 @@ def test_can_daytrade_limit(conn):
         close_trade(conn, tid, 101.00, "target")
 
     assert can_daytrade(conn, limit=3) is False
+
+
+def test_can_daytrade_mode_filter(conn):
+    for _ in range(3):
+        tid = create_trade(conn, "pead", "AAPL", "buy", "paper", 1)
+        fill_trade(conn, tid, 100.00)
+        close_trade(conn, tid, 101.00, "target")
+
+    assert can_daytrade(conn, limit=3, mode="paper") is False
+    assert can_daytrade(conn, limit=3, mode="live") is True
 
 
 # ── List Trades ──────────────────────────────────

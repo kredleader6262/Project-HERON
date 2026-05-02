@@ -1,12 +1,10 @@
 """Tests for M9 — Baseline-variant runner, equity curves, bootstrap beat test."""
 
 import json
-import sqlite3
 import random
 
 import pytest
 
-from heron.journal import init_journal
 from heron.journal.trades import create_trade, fill_trade, close_trade
 from heron.strategy.baseline import (
     ensure_baseline, mirror_candidate_to_baseline,
@@ -16,22 +14,8 @@ from heron.strategy.baseline import (
 
 
 @pytest.fixture
-def journal_conn(tmp_path):
-    db = tmp_path / "test_journal.db"
-    conn = sqlite3.connect(str(db))
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    init_journal(conn)
-    now = "2026-04-19T00:00:00+00:00"
-    conn.execute(
-        """INSERT INTO strategies (id, name, state, max_capital_pct, max_positions,
-           drawdown_budget_pct, min_hold_days, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        ("pead_v1", "PEAD v1", "PAPER", 0.15, 3, 0.05, 2, now, now),
-    )
-    conn.commit()
-    return conn
+def journal_conn(baseline_pead_v1_conn):
+    return baseline_pead_v1_conn
 
 
 def _make_closed_trade(conn, strategy_id, ticker, fill, close, date, side="buy"):

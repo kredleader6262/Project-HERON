@@ -12,9 +12,9 @@ A learning-first system that uses local and API language models to surface tradi
 
 ## Stack
 
-Python 3.11+ · SQLite (WAL) · Flask + HTMX · Ollama (Qwen 2.5 7B) · Claude API · Alpaca (IEX tier) · YAML config · Tailscale · Discord webhooks
+Python 3.11+ · SQLite (WAL) · Flask + HTMX · Ollama (Qwen 2.5 7B) · Claude API · Alpaca (IEX tier) · APScheduler · YAML config · Tailscale · Discord webhooks
 
-*Scheduler (APScheduler) is planned but not yet wired — research/exit loops are run on demand via the CLI for now.*
+APScheduler is wired through `heron run`: recurring jobs run through the runtime supervisor, and operator commands are queued from the dashboard Actions page.
 
 ## Architecture
 
@@ -46,6 +46,7 @@ The dashboard is the primary surface; the CLI is the scripting alternative. Most
 ```bash
 # 1. Launch the dashboard (default port 5001)
 heron dashboard                  # http://127.0.0.1:5001
+heron dashboard --lan            # listen on LAN; prints the phone-accessible URL
 
 # 2. Visit /setup in the browser — first-run wizard creates your initial paper
 #    campaign, the PEAD strategy, and its deterministic baseline.
@@ -110,7 +111,7 @@ heron journal inbox                     # show PROPOSED strategies
 ## Configuration
 
 - `config.yaml` — watchlist, news sources, timeframes, cost ceiling, alert/audit thresholds. Edit in place; *do not commit machine-specific changes*.
-- `.env` — secrets and per-machine overrides (`ALPACA_*`, `ANTHROPIC_API_KEY`, `DISCORD_WEBHOOK_URL`, `DASHBOARD_URL`, model IDs). Copy from `.env.example`. Never commit.
+- `.env` — secrets and per-machine overrides (`ALPACA_*`, `ANTHROPIC_API_KEY`, `DISCORD_WEBHOOK_URL`, `DASHBOARD_URL`, model IDs). Copy from `.env.example`. Set `DASHBOARD_URL` to your LAN/Tailscale dashboard URL if Discord links should open from your phone. Never commit.
 - `data/heron.db` — the journal (SQLite, WAL). Auto-created on first run; gitignored.
 - `logs/` — rotating logs. Gitignored.
 - `tools/ollama/`, `tools/ollama-models/` — local Ollama binary + model cache. Gitignored (multi-GB).
@@ -122,7 +123,7 @@ heron ollama start          # one-time per session
 heron run                   # foreground supervisor (Ctrl+C to stop)
 ```
 
-`heron run` schedules everything: pre-market research, executor cycles every 5 min during market hours, EOD debrief, daily health check, hourly heartbeat. All runs are journaled to `scheduler_runs`. The dashboard at `/scheduler` shows live status and lets you queue **Run Now / Pause / Resume** commands (picked up within ~10 s).
+`heron run` schedules everything: pre-market research, executor cycles every 5 min during market hours, EOD debrief, daily health check, hourly heartbeat. All runs are journaled to `scheduler_runs`. The dashboard at `/actions` shows live status and lets you queue **Run Now / Pause / Resume** commands (picked up within ~10 s). Legacy `/scheduler` URLs redirect there.
 
 Useful flags:
 
@@ -161,11 +162,11 @@ WantedBy=multi-user.target
 ```
 Then `sudo systemctl enable --now heron`.
 
-The dashboard runs as a separate process — see [`heron.dashboard`](heron/dashboard/__init__.py).
+The dashboard runs as a separate process — see [`heron.dashboard`](heron/dashboard/__init__.py). If the `heron` console command is unavailable, launch it with `python -m heron.cli dashboard`; use `python -m heron.cli dashboard --lan` for LAN access.
 
 ## Status
 
-**Milestones 1–15 complete.** See [`ROADMAP.md`](ROADMAP.md) for full progress.
+**Milestones 1–15.5 complete.** See [`ROADMAP.md`](ROADMAP.md) for full progress.
 
 | Milestone | What | Tests |
 |---|---|---|
@@ -184,5 +185,6 @@ The dashboard runs as a separate process — see [`heron.dashboard`](heron/dashb
 | M13 Backtester | Deterministic replay, cost model, memorization flag, `/backtests` | 15 |
 | M14 Cost Controls | `cost_guard` (projection, warn/trip), Discord alerts, `/costs` | 14 |
 | M15 Resilience | Startup audit, graceful shutdown, secrets hygiene, `/resilience` | 20 |
+| M15.5 Campaigns + Supervisor | Campaigns, templates, APScheduler `heron run`, `/campaigns`, `/actions` | 59 |
 
-**331 tests passing.** Integration tests pending API keys.
+**515 tests passing.** Integration tests pending API keys.

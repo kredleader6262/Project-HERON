@@ -12,10 +12,11 @@ import json
 import logging
 import random
 
-from heron.config import MONTHLY_COST_CEILING, CLAUDE_HAIKU_MODEL
+from heron.config import CLAUDE_HAIKU_MODEL
 from heron.journal.candidates import get_candidate
-from heron.journal.ops import log_audit, log_cost, get_monthly_cost
+from heron.journal.ops import log_audit, log_cost
 from heron.research.claude import call
+from heron.research.cost_guard import check_budget
 from heron.research.thesis import write_thesis
 from heron.data.sanitize import sanitize
 
@@ -36,9 +37,10 @@ def escalate_candidates(conn, candidate_ids, strategy_id=None, rng=None):
     if rng is None:
         rng = random.Random()
 
-    month_cost = get_monthly_cost(conn)
-    if month_cost >= MONTHLY_COST_CEILING:
-        return {"status": "cost_halted", "escalated": 0, "sampled": 0}
+    budget = check_budget(conn)
+    if not budget["research_allowed"]:
+        return {"status": "cost_halted", "escalated": 0, "sampled": 0,
+                "reason": budget["reason"], "month_cost": budget["mtd"]}
 
     thesis_ids = []
     sample_ids = []
@@ -57,7 +59,7 @@ def escalate_candidates(conn, candidate_ids, strategy_id=None, rng=None):
     # 1. Write theses for high-scoring candidates
     thesis_results = []
     for cid in thesis_ids:
-        if get_monthly_cost(conn) >= MONTHLY_COST_CEILING:
+        if not check_budget(conn)["research_allowed"]:
             break
         r = write_thesis(conn, cid, strategy_id=strategy_id)
         if r:
@@ -66,7 +68,7 @@ def escalate_candidates(conn, candidate_ids, strategy_id=None, rng=None):
     # 2. Audit-sample the rest
     audit_results = []
     for cid in sample_ids:
-        if get_monthly_cost(conn) >= MONTHLY_COST_CEILING:
+        if not check_budget(conn)["research_allowed"]:
             break
         r = _audit_sample(conn, cid, strategy_id=strategy_id)
         if r:
@@ -78,7 +80,7 @@ def escalate_candidates(conn, candidate_ids, strategy_id=None, rng=None):
         "sampled": len(audit_results),
         "thesis_results": thesis_results,
         "audit_results": audit_results,
-        "month_cost": get_monthly_cost(conn),
+        "month_cost": check_budget(conn)["mtd"],
     }
 
 

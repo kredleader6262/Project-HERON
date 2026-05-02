@@ -1,29 +1,16 @@
 """Tests for M11 — Audit system (post-mortems + trust score)."""
 
 import json
-import sqlite3
 from datetime import datetime, timezone, timedelta
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from heron.journal import init_journal
 from heron.journal.strategies import create_strategy
 from heron.journal.candidates import create_candidate
 from heron.journal.trades import create_trade, fill_trade, close_trade
 from heron.journal.ops import log_audit
 from heron.research import audit as audit_mod
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "j.db"))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def _losing_trade(conn, *, strategy_id="s1", ticker="AAPL", cand_created=None,
                   local_score=0.8):

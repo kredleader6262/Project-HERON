@@ -1,8 +1,6 @@
 """Tests for pre-trade risk checks."""
 
 import pytest
-from heron.journal import get_journal_conn, init_journal
-from heron.journal.strategies import create_strategy
 from heron.journal.trades import create_trade, fill_trade, close_trade
 from heron.strategy.risk import (
     CheckResult,
@@ -14,13 +12,8 @@ from heron.strategy.risk import (
 
 
 @pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test_risk.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    create_strategy(c, "pead", "PEAD")
-    yield c
-    c.close()
+def conn(pead_conn):
+    return pead_conn
 
 
 # ── CheckResult ──────────────────────────────────
@@ -42,7 +35,7 @@ def test_wash_sale_no_lots(conn):
 
 
 def test_wash_sale_with_lot(conn):
-    tid = create_trade(conn, "pead", "AAPL", "buy", "paper", 10)
+    tid = create_trade(conn, "pead", "AAPL", "buy", "live", 10)
     fill_trade(conn, tid, 150.00)
     close_trade(conn, tid, 140.00, "stop")  # creates wash-sale lot
     result = check_wash_sale_risk(conn, "AAPL")
@@ -52,7 +45,7 @@ def test_wash_sale_with_lot(conn):
 
 def test_wash_sale_family(conn):
     """SPY loss should block VOO entry."""
-    tid = create_trade(conn, "pead", "SPY", "buy", "paper", 5)
+    tid = create_trade(conn, "pead", "SPY", "buy", "live", 5)
     fill_trade(conn, tid, 400.00)
     close_trade(conn, tid, 390.00, "stop")
     result = check_wash_sale_risk(conn, "VOO")
@@ -72,7 +65,7 @@ def test_pdt_under_limit(conn):
 
 def test_pdt_at_limit(conn):
     for _ in range(3):
-        tid = create_trade(conn, "pead", "AAPL", "buy", "paper", 1)
+        tid = create_trade(conn, "pead", "AAPL", "buy", "live", 1)
         fill_trade(conn, tid, 100.00)
         close_trade(conn, tid, 101.00, "target")  # same-day close = day trade
     result = check_pdt_risk(conn, requires_same_day_exit=True, limit=3)
@@ -165,7 +158,7 @@ def test_pre_trade_all_pass(conn):
 
 
 def test_pre_trade_wash_sale_fails(conn):
-    tid = create_trade(conn, "pead", "AAPL", "buy", "paper", 10)
+    tid = create_trade(conn, "pead", "AAPL", "buy", "live", 10)
     fill_trade(conn, tid, 150.00)
     close_trade(conn, tid, 140.00, "stop")
 
@@ -186,16 +179,19 @@ def test_paper_loss_doesnt_block_live_entry(conn):
     fill_trade(conn, tid, 150.00)
     close_trade(conn, tid, 140.00, "stop")  # paper loss → wash-sale lot
 
-    # Live-mode check should pass — paper loss is not a real tax event.
-    # (Current implementation gates wash-sale entirely on mode=paper, so this
-    # still isn't perfect mode isolation, but it stops the false block.)
     live_check = check_wash_sale_risk(conn, "AAPL", mode="live")
-    # With the current implementation the check still sees the lot in the
-    # journal because the lot is mode-agnostic. If isolation tightens, this
-    # assertion can flip — but for now we only assert that mode=paper is a
-    # no-op:
     paper_check = check_wash_sale_risk(conn, "AAPL", mode="paper")
+    assert live_check.ok
     assert paper_check.ok
+
+
+def test_paper_daytrades_do_not_block_live_pdt(conn):
+    for _ in range(3):
+        tid = create_trade(conn, "pead", "AAPL", "buy", "paper", 1)
+        fill_trade(conn, tid, 100.00)
+        close_trade(conn, tid, 101.00, "target")
+
+    assert check_pdt_risk(conn, requires_same_day_exit=True, limit=3, mode="live").ok
 
 
 def test_paper_open_position_doesnt_consume_live_exposure(conn):

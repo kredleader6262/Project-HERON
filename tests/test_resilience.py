@@ -2,7 +2,6 @@
 
 import os
 import signal
-import sqlite3
 import sys
 import tempfile
 from pathlib import Path
@@ -10,8 +9,6 @@ from unittest.mock import patch
 
 import pytest
 
-from heron.journal import init_journal
-from heron.journal.strategies import create_strategy
 from heron.journal.trades import create_trade, fill_trade
 from heron.resilience.startup_audit import run_startup_audit
 from heron.resilience.shutdown import (
@@ -24,14 +21,8 @@ from heron.resilience.secrets import (
 
 
 @pytest.fixture
-def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "j.db"))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    create_strategy(c, "s1", name="test", kind="research_local")
-    yield c
-    c.close()
+def conn(s1_conn):
+    return s1_conn
 
 
 class _FakeBroker:

@@ -1,29 +1,16 @@
 """Tests for M14 — centralized cost guard."""
 
-import sqlite3
 from datetime import datetime, timezone
 from unittest.mock import patch
 
 import pytest
 
-from heron.journal import init_journal
 from heron.journal.ops import log_cost
 from heron.research.cost_guard import (
     CostTripped, check_budget, project_month_end,
     assert_research_allowed, notify_if_threshold,
     WARNING_PCT,
 )
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "j.db"))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def _ym_today():
     return datetime.now(timezone.utc).strftime("%Y-%m")
@@ -33,8 +20,8 @@ def _today():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _spend(conn, amount, model="claude_sonnet"):
-    log_cost(conn, model, 1000, 500, amount, date=_today())
+def _spend(conn, amount, model="claude_sonnet", date=None):
+    log_cost(conn, model, 1000, 500, amount, date=date or _today())
 
 
 # ── Projection ────────────────────────────────
@@ -75,7 +62,7 @@ class TestCheckBudget:
         # Pick a spend that keeps MTD under ceiling but projection over 80%.
         # Mock now to day 20 of a 30-day month so projection ≈ mtd * 1.5
         fake_now = datetime(2026, 4, 20, tzinfo=timezone.utc)
-        _spend(conn, 25.0)  # projection ~ $37.50 = 83% of $45
+        _spend(conn, 25.0, date="2026-04-20")  # projection ~ $37.50 = 83% of $45
         b = check_budget(conn, now=fake_now)
         assert b["status"] == "warning"
         assert b["research_allowed"]
@@ -83,7 +70,7 @@ class TestCheckBudget:
     def test_tripped_when_projection_exceeds_ceiling(self, conn):
         # Day 10 of 30, spend $20 → projection $60 > $45
         fake_now = datetime(2026, 4, 10, tzinfo=timezone.utc)
-        _spend(conn, 20.0)
+        _spend(conn, 20.0, date="2026-04-10")
         b = check_budget(conn, now=fake_now)
         assert b["status"] == "tripped"
         assert not b["research_allowed"]

@@ -10,7 +10,7 @@ import time
 
 import httpx
 
-from heron.config import ANTHROPIC_API_KEY, MONTHLY_COST_CEILING, CLAUDE_SONNET_MODEL
+from heron.config import ANTHROPIC_API_KEY, CLAUDE_SONNET_MODEL
 from heron.data.sanitize import sanitize
 
 log = logging.getLogger(__name__)

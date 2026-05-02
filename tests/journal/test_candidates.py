@@ -1,21 +1,14 @@
 """Tests for candidates CRUD."""
 
 import pytest
-from heron.journal import get_journal_conn, init_journal
-from heron.journal.strategies import create_strategy
 from heron.journal.candidates import (
     create_candidate, dispose_candidate, get_candidate, list_candidates,
 )
 
 
 @pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test_cand.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    create_strategy(c, "pead", "PEAD")
-    yield c
-    c.close()
+def conn(pead_conn):
+    return pead_conn
 
 
 def test_create_candidate(conn):

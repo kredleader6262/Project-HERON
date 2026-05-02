@@ -1,22 +1,11 @@
 """Tests for strategy CRUD and state machine."""
 
 import pytest
-from heron.journal import get_journal_conn, init_journal
 from heron.journal.strategies import (
     create_strategy, get_strategy, list_strategies,
     transition_strategy, get_state_history,
     VALID_STATES, VALID_TRANSITIONS,
 )
-
-
-@pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test_strat.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def test_create_strategy(conn):
     s = create_strategy(conn, "pead_v1", "PEAD Strategy",

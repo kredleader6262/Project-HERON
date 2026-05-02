@@ -1,8 +1,6 @@
 """Tests for cost tracking, audits, reviews, events."""
 
 import pytest
-from heron.journal import get_journal_conn, init_journal
-from heron.journal.strategies import create_strategy
 from heron.journal.ops import (
     log_cost, get_monthly_cost, get_daily_costs,
     log_audit, get_audits,
@@ -12,13 +10,8 @@ from heron.journal.ops import (
 
 
 @pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test_ops.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    create_strategy(c, "pead", "PEAD")
-    yield c
-    c.close()
+def conn(pead_conn):
+    return pead_conn
 
 
 # ── Cost Tracking ──────────────────────────────────

@@ -1,27 +1,14 @@
 """Tests for M12 — Discord alerts + EOD debrief."""
 
 import json
-import sqlite3
 import time
 from unittest.mock import patch, MagicMock
 
 import pytest
 
-from heron.journal import init_journal
 from heron.journal.strategies import create_strategy
 from heron.journal.trades import create_trade, fill_trade, close_trade
 from heron.journal.ops import log_event, log_cost
-
-
-@pytest.fixture
-def conn(tmp_path):
-    c = sqlite3.connect(str(tmp_path / "j.db"))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
-
 
 @pytest.fixture
 def state_file(tmp_path, monkeypatch):

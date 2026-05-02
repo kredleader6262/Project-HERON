@@ -10,9 +10,10 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 
-from heron.config import MEGA_CAP, WATCHLIST, MONTHLY_COST_CEILING
+from heron.config import WATCHLIST
 from heron.journal.candidates import create_candidate, list_candidates
-from heron.journal.ops import log_cost, get_monthly_cost
+from heron.journal.ops import log_cost
+from heron.research.cost_guard import check_budget
 
 log = logging.getLogger(__name__)
 
@@ -37,11 +38,9 @@ def generate_candidates(conn, classifications, price_data=None, strategy_id=None
     if not strategy_id:
         strategy_id = "pead_v1"  # default active strategy
 
-    # Cost gate — don't generate if we've hit ceiling
-    month_cost = get_monthly_cost(conn)
-    if month_cost >= MONTHLY_COST_CEILING:
-        log.warning(f"Cost ceiling reached (${month_cost:.2f} >= ${MONTHLY_COST_CEILING}), "
-                     "skipping candidate generation")
+    budget = check_budget(conn)
+    if not budget["research_allowed"]:
+        log.warning(f"Research budget tripped ({budget['reason']}), skipping candidate generation")
         return []
 
     relevant = [c for c in classifications

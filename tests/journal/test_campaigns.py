@@ -12,17 +12,6 @@ from heron.journal.campaigns import (
 from heron.journal.strategies import create_strategy
 
 
-@pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test.db"
-    c = sqlite3.connect(str(db))
-    c.row_factory = sqlite3.Row
-    c.execute("PRAGMA foreign_keys=ON")
-    init_journal(c)
-    yield c
-    c.close()
-
-
 def test_create_and_get(conn):
     c = create_campaign(conn, "exp_1", "Experiment 1", description="first run")
     assert c["state"] == "DRAFT"

@@ -8,10 +8,9 @@ Operator must approve before anything trades.
 import json
 import logging
 
-from heron.config import MONTHLY_COST_CEILING
 from heron.data.sanitize import sanitize
 from heron.journal.strategies import create_strategy, list_strategies
-from heron.journal.ops import log_cost, log_event, get_monthly_cost
+from heron.journal.ops import log_cost, log_event
 from heron.research.claude import call
 from heron.research.progress import Spinner
 

@@ -4,21 +4,10 @@ import json
 
 import pytest
 
-from heron.journal import init_journal, get_journal_conn
 from heron.journal.strategies import (
     create_strategy, transition_strategy, set_strategy_tags,
 )
 from heron.strategy.portfolio import compute_allocations, get_strategy_budget
-
-
-@pytest.fixture
-def conn(tmp_path):
-    db = tmp_path / "test.db"
-    c = get_journal_conn(str(db))
-    init_journal(c)
-    yield c
-    c.close()
-
 
 def _mk(c, sid, *, max_cap=0.15, dd_budget=0.05, tags=None, paper=True):
     create_strategy(c, sid, sid, max_capital_pct=max_cap,

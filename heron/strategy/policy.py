@@ -112,12 +112,13 @@ def assemble_state(conn, *, mode="paper", equity=None):
     # Open positions count.
     open_n = len([t for t in list_trades(conn, open_only=True, mode=mode)])
 
-    # Research cost today.
+    # Research cost state. `research_cost_today` is kept for existing YAML rules;
+    # it currently reflects month-to-date spend from the centralized cost guard.
     try:
         budget = check_budget(conn)
-        research_cost_today = float(budget.get("month_to_date", 0.0))
+        research_cost_mtd = float(budget.get("mtd", budget.get("month_to_date", 0.0)))
     except Exception:  # noqa: BLE001
-        research_cost_today = 0.0
+        research_cost_mtd = 0.0
 
     return {
         "mode": mode,
@@ -126,7 +127,8 @@ def assemble_state(conn, *, mode="paper", equity=None):
         "daily_pnl": daily_pnl,
         "daily_pnl_pct": daily_pnl / eq,
         "open_positions": open_n,
-        "research_cost_today": research_cost_today,
+        "research_cost_today": research_cost_mtd,
+        "research_cost_mtd": research_cost_mtd,
     }
 
 

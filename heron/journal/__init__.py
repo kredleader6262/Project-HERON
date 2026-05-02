@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS trades (
     mode            TEXT NOT NULL DEFAULT 'paper', -- paper|live
 
     -- Order
-    client_order_id TEXT UNIQUE,                 -- {strategy}_{utc_ms}_{ticker}_{side}
+    client_order_id TEXT UNIQUE,                 -- opaque broker id from order-id helpers
     order_type      TEXT DEFAULT 'market',
     qty             REAL NOT NULL,
     limit_price     REAL,

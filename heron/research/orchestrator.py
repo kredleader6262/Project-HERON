@@ -13,7 +13,7 @@ Never in the execution hot path. Called by scheduler or CLI.
 import logging
 from datetime import datetime, timedelta, timezone
 
-from heron.config import WATCHLIST, MONTHLY_COST_CEILING, ANTHROPIC_API_KEY
+from heron.config import WATCHLIST, ANTHROPIC_API_KEY
 from heron.data import DataFeed
 from heron.journal import get_journal_conn, init_journal
 from heron.journal.ops import log_event, get_monthly_cost

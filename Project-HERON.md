@@ -204,15 +204,15 @@ Talks to the broker. Submits orders, listens for fills, handles rejections and r
 
 #### 4.4.1 Fractional Share Constraints
 
-At $500 with 3 concurrent positions, HERON trades fractional shares. Alpaca imposes hard constraints: **fractional orders do not support bracket or OCO orders, cannot be replaced (only canceled and resubmitted), and are day-only (TIF must be DAY).** Stop-loss and take-profit logic lives in HERON's own polling code, not in Alpaca order types. The executor polls open positions every 30 seconds during regular hours, compares against stored stop/target levels, and submits market close orders when triggered.
+At $500 with 3 concurrent positions, HERON trades fractional shares. Alpaca imposes hard constraints: **fractional orders do not support bracket or OCO orders, cannot be replaced (only canceled and resubmitted), and are day-only (TIF must be DAY).** Stop-loss and take-profit logic lives in HERON's own polling code, not in Alpaca order types. The current supervisor runs executor cycles every 5 minutes during regular hours; any move toward a shorter stop-poll cadence should update runtime configuration, tests, and docs together.
 
 #### 4.4.2 Idempotency
 
-Every order carries a deterministic `client_order_id` formatted as `{strategy}_{utc_ms}_{ticker}_{side}`. On any network error, retry, or ambiguous response, the executor first queries Alpaca's orders endpoint by this ID before resubmitting. HTTP 422 *client_order_id must be unique* is the correct signal that a previous retry already succeeded, not an error.
+Every broker order carries a deterministic, opaque `client_order_id`. Entries use `make_entry_order_id(strategy, candidate_id, ticker, side)` and exits use `make_close_order_id(strategy, trade_id, ticker, side)`. On any network error, retry, or ambiguous response, the executor first queries Alpaca's orders endpoint by this ID before resubmitting. HTTP 422 *client_order_id must be unique* is the correct signal that a previous retry already succeeded, not an error.
 
 #### 4.4.3 Reconciliation
 
-Reconciliation runs at market open and close. Compares SQLite state (open positions, open orders, cash balance) against Alpaca's `/v2/orders`, `/v2/positions`, and `/v2/account`. Any drift triggers an immediate Discord alert and halts new entries until manually acknowledged.
+Reconciliation runs at market open and close. Compares SQLite state (open positions, open orders, cash balance) against Alpaca's `/v2/orders`, `/v2/positions`, and `/v2/account`. Any drift must be operator-visible and block new live entries until the broker/journal mismatch is resolved.
 
 #### 4.4.4 Other Constraints
 
@@ -220,7 +220,7 @@ Reconciliation runs at market open and close. Compares SQLite state (open positi
 - No shorting, no options, no leveraged products.
 - Actual fill price recorded against requested; slippage logged but not used as retroactive close trigger.
 - Hard shutdown: on operator signal or unrecoverable error, flatten all positions, exit cleanly.
-- Never submit orders when last quote is older than 10 seconds or Alpaca's status page reports a trading-API incident.
+- Never submit orders when last quote is older than 10 seconds. Alpaca incident gating remains pre-live hardening until wired into the execution path.
 
 ### 4.5 Journal and Dashboard
 
@@ -284,7 +284,7 @@ Every hard cap names its fallback behavior. No orphan limits with undefined cons
 | Wash-sale exposure detected pre-trade | Reject the entry; log disallowed-loss amount | 30-day window closes |
 | Local model unresponsive | Alert; fall back to rules-only candidate generator | Operator toggles research back on |
 | Data feed failure or Alpaca incident | Alert; freeze new entries, manage open positions | Data feed recovers and quote age < 10s |
-| Reconciliation drift detected | Halt new entries; alert operator | Operator acknowledges and resolves |
+| Reconciliation drift detected | Halt new live entries; alert/operator-visible event | Operator resolves broker/journal mismatch and reruns startup audit; dedicated acknowledge/resume UI is follow-up work if needed |
 
 ### 5.4 Wash-Sale Tracking
 
@@ -474,11 +474,11 @@ Every strategy proposal that reaches PAPER state is first run through the backte
 
 ### 13.1 Stale-Data Kill Switch
 
-The bot never submits orders when the last successful quote is older than 10 seconds, or when Alpaca's status page reports an active trading-API incident. Third-party monitors logged more than 60 Alpaca data-endpoint outages in a recent four-month window. Scheduled maintenance runs the second Saturday of each month, 9:00–11:30 ET.
+The implemented kill switch rejects orders when the last successful quote is older than 10 seconds. Alpaca status-page incident gating is a pre-live hardening item; until wired, operators should treat broker/API incident checks as manual operational readiness. Third-party monitors logged more than 60 Alpaca data-endpoint outages in a recent four-month window. Scheduled maintenance runs the second Saturday of each month, 9:00–11:30 ET.
 
 ### 13.2 Corporate Actions
 
-The bot polls Alpaca's `/v2/corporate_actions/announcements` endpoint nightly. Splits, reverse splits, and dividends are recorded in the journal and applied to stop-loss and take-profit levels overnight. Delistings and mergers flag the position for operator review next morning and block new entries in the affected ticker.
+Planned pre-live hardening: poll Alpaca's `/v2/corporate_actions/announcements` endpoint nightly. Splits, reverse splits, and dividends should be recorded in the journal and applied to stop-loss and take-profit levels overnight. Delistings and mergers should flag the position for operator review next morning and block new entries in the affected ticker.
 
 ### 13.3 Secrets and Backup
 
