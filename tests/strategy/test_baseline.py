@@ -93,6 +93,43 @@ class TestMirrorCandidate:
         mid2 = mirror_candidate_to_baseline(journal_conn, cid, "pead_v1_baseline")
         assert mid1 == mid2  # Deduped
 
+    def test_mirror_preserves_signal_link(self, journal_conn):
+        from heron.journal.campaigns import create_campaign
+        from heron.journal.candidates import create_candidate
+        from heron.journal.signals import create_signal, get_signal_for_candidate, link_signal_candidate
+
+        create_campaign(journal_conn, "baseline_desk", "Baseline Desk", state="ACTIVE")
+        journal_conn.execute("UPDATE strategies SET campaign_id='baseline_desk' WHERE id='pead_v1'")
+        journal_conn.commit()
+        ensure_baseline(journal_conn, "pead_v1")
+        cid = create_candidate(journal_conn, "pead_v1", "AAPL", side="buy", context_json='{}')
+        sid = create_signal(
+            journal_conn, "baseline_desk", "research_local", "earnings", "long_bias",
+            "AAPL beat", ticker="AAPL",
+        )
+        link_signal_candidate(journal_conn, sid, cid, "pead_v1")
+
+        mid1 = mirror_candidate_to_baseline(journal_conn, cid, "pead_v1_baseline")
+        mid2 = mirror_candidate_to_baseline(journal_conn, cid, "pead_v1_baseline")
+        trace = get_signal_for_candidate(journal_conn, mid1)
+        assert mid1 == mid2
+        assert trace["signal_id"] == sid
+        assert trace["bridge_source"] == "baseline_mirror"
+        count = journal_conn.execute(
+            "SELECT COUNT(*) AS n FROM signal_candidates WHERE candidate_id=?", (mid1,)
+        ).fetchone()["n"]
+        assert count == 1
+
+    def test_mirror_without_signal_has_no_signal_link(self, journal_conn):
+        from heron.journal.candidates import create_candidate
+        from heron.journal.signals import get_signal_for_candidate
+
+        ensure_baseline(journal_conn, "pead_v1")
+        cid = create_candidate(journal_conn, "pead_v1", "MSFT", side="buy", context_json='{}')
+
+        mid = mirror_candidate_to_baseline(journal_conn, cid, "pead_v1_baseline")
+        assert get_signal_for_candidate(journal_conn, mid) is None
+
     def test_mirror_nonexistent(self, journal_conn):
         result = mirror_candidate_to_baseline(journal_conn, 9999, "pead_v1_baseline")
         assert result is None

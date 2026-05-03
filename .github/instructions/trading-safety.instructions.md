@@ -3,7 +3,7 @@ description: "Use when: writing or modifying strategy layer, execution layer, or
 ---
 # Trading Safety Rules
 
-Full specs in `Project-HERON.md` Sections 4.3–4.4, 5.
+Full specs in `Project-HERON-v4.md` Sections 4.3–4.4, 5.
 
 ## Order Submission
 
@@ -15,7 +15,7 @@ Full specs in `Project-HERON.md` Sections 4.3–4.4, 5.
 
 ## Wash-Sale (IRC §1091)
 
-- 30-day lookback on ticker *families* (SPY/VOO/IVV are one family). See `Project-HERON.md` Section 5.4.1 for the map.
+- 30-day lookback on ticker *families* (SPY/VOO/IVV are one family). See `Project-HERON-v4.md` Section 5.4.1 for the map.
 - Pre-trade: in live mode, query journal for any live closed losing lot in the same family within 30 days. If found, reject entry. Paper mode skips wash-sale checks.
 - Post-trade: on every sale at a loss, record loss amount and 30-day window end date.
 - A missed wash-sale violation is an **automatic halt on all strategies**.
@@ -45,7 +45,7 @@ Full specs in `Project-HERON.md` Sections 4.3–4.4, 5.
 
 ## Cap-and-Fallback
 
-Every hard cap names its fallback. No orphan limits. See `Project-HERON.md` Section 5.3 for full table.
+Every hard cap names its fallback. No orphan limits. See `Project-HERON-v4.md` Section 5.3 for full table.
 
 ## The Rule
 

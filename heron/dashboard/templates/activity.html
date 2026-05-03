@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Activity - HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Activity</h1>
+    <p class="lede">Chronological read-only aggregate. Scheduler controls remain on Actions.</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/actions" class="btn btn-primary">Actions</a>
+    <a href="/audits" class="btn">Audits</a>
+    <a href="/trades" class="btn">Trades</a>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+  <div class="lg:col-span-2">
+    <div class="section-title">Recent timeline</div>
+    <div class="card overflow-hidden">
+      {% if history %}
+      <table class="htable">
+        <thead><tr><th>When</th><th>Kind</th><th>Source</th><th>Message</th></tr></thead>
+        <tbody>
+        {% for h in history %}
+          <tr>
+            <td class="mono dim">{{ h.ts }}</td>
+            <td><span class="pill {% if h.severity == 'error' %}pill-err{% elif h.severity == 'warn' %}pill-warn{% else %}pill-info{% endif %}">{{ h.kind }}: {{ h.type }}</span></td>
+            <td class="dim">{{ h.source }}</td>
+            <td>{{ h.message }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No events or scheduler runs yet.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Existing surfaces</div>
+    <div class="card p-4" style="display: grid; gap: 0.65rem;">
+      <a href="/actions" class="link">Actions and scheduler commands</a>
+      <a href="/candidates" class="link">Candidate history</a>
+      <a href="/trades" class="link">Trade log</a>
+      <a href="/audits" class="link">Audit log</a>
+      <a href="/agents" class="link">Agent activity</a>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+  <div>
+    <div class="section-title">Latest candidates</div>
+    <div class="card overflow-hidden">
+      {% if recent_candidates %}
+      <table class="htable">
+        <thead><tr><th>ID</th><th>Ticker</th><th>Disposition</th><th>Created</th></tr></thead>
+        <tbody>
+        {% for c in recent_candidates %}
+          <tr>
+            <td><a class="link mono" href="/candidate/{{ c.id }}">#{{ c.id }}</a></td>
+            <td class="mono">{{ c.ticker }}</td>
+            <td><span class="pill s-{{ c.disposition|upper }}">{{ c.disposition }}</span></td>
+            <td class="mono dim">{{ c.created_at }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No candidates recorded.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Latest trades</div>
+    <div class="card overflow-hidden">
+      {% if recent_trades %}
+      <table class="htable">
+        <thead><tr><th>ID</th><th>Ticker</th><th>Mode</th><th class="r">PnL</th></tr></thead>
+        <tbody>
+        {% for t in recent_trades %}
+          <tr>
+            <td class="mono">#{{ t.id }}</td>
+            <td class="mono">{{ t.ticker }}</td>
+            <td class="dim">{{ t.mode }}</td>
+            <td class="r num {% if (t.pnl or 0) < 0 %}pnl-neg{% elif (t.pnl or 0) > 0 %}pnl-pos{% endif %}">{{ "%.2f"|format(t.pnl or 0) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No trades recorded.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

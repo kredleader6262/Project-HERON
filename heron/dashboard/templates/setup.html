@@ -6,8 +6,8 @@
   <div>
     <h1 class="text-3xl font-semibold mb-2">First-run setup</h1>
     <p class="text-sm text-zinc-400">
-      Bootstrap your initial paper campaign with a PEAD strategy and its deterministic baseline.
-      You can always add more campaigns and strategies later. CLI equivalent: <code class="text-zinc-300">heron init</code>.
+      Bootstrap your initial PEAD Desk with a PEAD strategy and its deterministic baseline.
+      You can always add more desks and strategies later. CLI equivalent: <code class="text-zinc-300">heron init</code>.
     </p>
   </div>
 
@@ -15,10 +15,10 @@
     <div class="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
       <p class="font-medium text-amber-300">Setup already complete.</p>
       <p class="text-zinc-300 mt-1">
-        The journal already has campaigns/strategies. Re-running setup is a no-op
+        The journal already has desks/strategies. Re-running setup is a no-op
         (we won't overwrite real history). Visit
         <a class="underline" href="{{ url_for('strategies_view') }}">Strategies</a>
-        or <a class="underline" href="{{ url_for('campaigns_view') }}">Campaigns</a>.
+        or <a class="underline" href="{{ url_for('desks_view') }}">Desks</a>.
       </p>
     </div>
   {% endif %}
@@ -26,12 +26,12 @@
   {% if applied %}
     <div class="rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-4 text-sm space-y-1">
       <p class="font-medium text-emerald-300">Bootstrapped.</p>
-      <p>Campaign <code>{{ applied.campaign_id }}</code> created with {{ applied.strategy_ids|length }} strategies.</p>
+      <p>Desk <code>{{ applied.campaign_id }}</code> created with {{ applied.strategy_ids|length }} strategies.</p>
       <p>
         Next:
         <a class="underline" href="{{ url_for('strategies_view') }}">Strategies</a> ·
         <a class="underline" href="{{ url_for('actions_view') }}">Actions</a> ·
-        <a class="underline" href="{{ url_for('campaigns_view') }}">Campaigns</a>.
+        <a class="underline" href="{{ url_for('desks_view') }}">Desks</a>.
       </p>
     </div>
   {% endif %}
@@ -44,7 +44,7 @@
                class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
       </label>
       <label class="block">
-        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Campaign name</span>
+        <span class="block text-xs uppercase tracking-wide text-zinc-400 mb-1">Desk name</span>
         <input name="campaign_name" type="text" value="{{ form.campaign_name }}"
                class="w-full bg-zinc-950 border border-zinc-800 rounded px-3 py-2 text-sm">
       </label>
@@ -80,7 +80,7 @@
       </button>
       {% if not already %}
         <button name="action" value="apply" type="submit"
-                onclick="return confirm('Create the campaign + strategies now?');"
+                onclick="return confirm('Create the Desk + strategies now?');"
                 class="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">
           Apply
         </button>
@@ -97,7 +97,7 @@
       <h2 class="text-lg font-semibold">Plan preview</h2>
 
       <div>
-        <h3 class="text-xs uppercase tracking-wide text-zinc-400 mb-2">Campaign</h3>
+        <h3 class="text-xs uppercase tracking-wide text-zinc-400 mb-2">Desk</h3>
         <div class="text-sm font-mono">
           {{ plan.campaign.id }} — {{ plan.campaign.name }}
           <span class="text-zinc-500">({{ plan.campaign.mode }}, ${{ "%.2f"|format(plan.campaign.capital_allocation_usd) }},

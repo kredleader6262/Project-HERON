@@ -1,12 +1,12 @@
 # ROADMAP
 
 Milestone tracker for Project HERON. Each milestone is independently demo-able.
-See `Project-HERON.md` Section 15 for full descriptions.
+See `Project-HERON-v4.md` Section 15 for current stage boundaries and `Project-HERON-v3.md` Section 15 for historical milestone descriptions.
 
 | # | Milestone | Status | Notes |
 |---|---|---|---|
 | 1 | Data layer | ✅ Done | 48 unit tests passing. Integration tests need API keys. |
-| 2 | Journal and SQLite schema | ✅ Done | 10 tables, 47 tests, CLI demo (`heron journal demo`). |
+| 2 | Journal and SQLite schema | ✅ Done | 13 journal + 5 cache tables after migrations, 47 tests, CLI demo (`heron journal demo`). |
 | 3 | Strategy framework skeleton | ✅ Done | Base class, risk checks (wash-sale/PDT/exposure/daily-loss), sizing, 33 tests. |
 | 4 | Strategy layer (PEAD) | ✅ Done | PEAD strategy with screen/levels/exit, 20 tests. Deterministic + LLM variant support. |
 | 5 | Execution layer | ✅ Done | Broker adapter, Alpaca paper adapter, executor with risk checks, virtual stops, reconciliation. 11 tests. |
@@ -20,5 +20,11 @@ See `Project-HERON.md` Section 15 for full descriptions.
 | 13 | Backtester | ✅ Done | Deterministic replay engine, SEC/FINRA/slippage cost model, report persistence, memorization-contamination flag, synthetic candidate seeder, dashboard `/backtests` + detail view. 15 tests. CLI: `heron backtest run/list`. |
 | 14 | Cost controls | ✅ Done | Centralized `cost_guard` (projection + warn/trip states), Discord `cost_warning`/`cost_trip` alerts, research halt (execution continues), `/costs` dashboard + CLI (`heron cost status/notify`). 14 tests. |
 | 15 | Resilience hardening | ✅ Done | Startup audit (reconciliation, stop coverage, pending work), graceful shutdown signal handlers, secrets hygiene (env perms, required vars, log leak scan), `/resilience` dashboard + CLI (`heron resilience audit/secrets`). 20 tests. |
-| 15.5 | Campaigns + templates + supervisor | ✅ Done | Campaigns as first-class container (DRAFT→ACTIVE→PAUSED→GRADUATED→RETIRED, owns paper-window clock + capital). Strategy templates registry (parameterized PEAD authoring). APScheduler-driven `heron run` supervisor with preflight, heartbeat, dashboard transparency (`/campaigns`, `/actions`; `/scheduler` redirects). 515 tests passing. Unblocks M16. |
+| 15.5 | Campaigns + templates + supervisor | ✅ Done | Campaigns as first-class container (DRAFT→ACTIVE→PAUSED→GRADUATED→RETIRED, owns paper-window clock + capital). Strategy templates registry (parameterized PEAD authoring). APScheduler-driven `heron run` supervisor with preflight, heartbeat, dashboard transparency (`/campaigns`, `/actions`; `/scheduler` redirects). 518 tests collected. Unblocks M16. |
 | 16 | 90-day paper trading (PEAD) | ⬜ | Mandatory paper window before live graduation |
+
+## Phase 2
+
+| Milestone | Status | Notes |
+|---|---|---|
+| Extensibility Playbook | deferred — post-v4-refactor | Design and implement a source/provider onboarding pattern for news feeds, APIs, LLM providers, and data sources. Goals: source registry, uniform adversarial-input sanitization pipeline, source-agnostic cost accounting, onboarding documentation that walks through "to add a new source, do these five things", and tests proving a new source can be added without modifying execution code. The Signal layer's source-compatibility seams preserved in Stage 5 are the foundation for this work. |

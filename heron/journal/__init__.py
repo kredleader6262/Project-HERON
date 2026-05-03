@@ -117,6 +117,47 @@ CREATE TABLE IF NOT EXISTS candidates (
     FOREIGN KEY (strategy_id) REFERENCES strategies(id)
 );
 
+CREATE TABLE IF NOT EXISTS signals (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id          TEXT NOT NULL,
+    source              TEXT NOT NULL,
+    finding_ref_json    TEXT,
+    producing_agent     TEXT,
+    producing_model     TEXT,
+    ticker              TEXT,
+    sector              TEXT,
+    asset               TEXT,
+    signal_type         TEXT NOT NULL,
+    bias                TEXT NOT NULL CHECK (bias IN (
+                            'long_bias', 'short_bias', 'informational', 'risk-off'
+                         )),
+    thesis              TEXT NOT NULL,
+    confidence          REAL,
+    classification      TEXT,
+    evidence_json       TEXT,
+    generated_at        TEXT NOT NULL,
+    expires_at          TEXT,
+    resolution_status   TEXT NOT NULL DEFAULT 'open',
+    outcome_json        TEXT,
+    baseline_json       TEXT,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+);
+
+CREATE TABLE IF NOT EXISTS signal_candidates (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    signal_id       INTEGER NOT NULL,
+    candidate_id    INTEGER NOT NULL,
+    strategy_id     TEXT NOT NULL,
+    bridge_source   TEXT NOT NULL DEFAULT 'research',
+    created_at      TEXT NOT NULL,
+    FOREIGN KEY (signal_id) REFERENCES signals(id) ON DELETE CASCADE,
+    FOREIGN KEY (candidate_id) REFERENCES candidates(id),
+    FOREIGN KEY (strategy_id) REFERENCES strategies(id),
+    UNIQUE(candidate_id)
+);
+
 -- ============================================================
 -- TRADES — every executed trade
 -- ============================================================
@@ -280,6 +321,12 @@ CREATE TABLE IF NOT EXISTS backtest_reports (
 CREATE INDEX IF NOT EXISTS idx_strategies_state ON strategies(state);
 CREATE INDEX IF NOT EXISTS idx_candidates_strategy ON candidates(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_candidates_disposition ON candidates(disposition);
+CREATE INDEX IF NOT EXISTS idx_signals_campaign ON signals(campaign_id, generated_at);
+CREATE INDEX IF NOT EXISTS idx_signals_ticker ON signals(ticker, generated_at);
+CREATE INDEX IF NOT EXISTS idx_signals_type ON signals(signal_type, bias);
+CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(resolution_status, expires_at);
+CREATE INDEX IF NOT EXISTS idx_signal_candidates_signal ON signal_candidates(signal_id);
+CREATE INDEX IF NOT EXISTS idx_signal_candidates_strategy ON signal_candidates(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy_id);
 CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
 CREATE INDEX IF NOT EXISTS idx_trades_mode ON trades(mode);

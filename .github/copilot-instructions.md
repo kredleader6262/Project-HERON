@@ -1,6 +1,6 @@
 # Project HERON — Copilot Instructions
 
-**Source of truth:** `Project-HERON.md` has full specs. Link to it; don't duplicate it here.
+**Source of truth:** `Project-HERON-v4.md` has full specs. Link to it; don't duplicate it here. `Project-HERON-v3.md` is historical reference only.
 
 ## Philosophy
 
@@ -20,7 +20,7 @@ Five layers, strict interfaces. **Each layer can be swapped without touching the
 | Execution | Submit orders, manage fills, reconcile | **Idempotent orders, polled virtual stops** |
 | Journal & Dashboard | Persist every decision, serve web UI | **Journal is the product** — every decision logged |
 
-If you're unsure which layer something belongs to, check `Project-HERON.md` Section 4.
+If you're unsure which layer something belongs to, check `Project-HERON-v4.md` Section 4.
 
 Quick placement checks:
 - Risk/order/account rules go in Strategy or Execution, with trading-safety tests.
@@ -89,7 +89,7 @@ Never assume a change is isolated. Always check.
 
 ## Documentation
 
-- **If you change code, check if docs need updating.** READMEs, inline docs, config examples, and `Project-HERON.md` if specs changed — scan them.
+- **If you change code, check if docs need updating.** READMEs, inline docs, config examples, and `Project-HERON-v4.md` if specs changed — scan them.
 - **Don't create docs for docs' sake.** Only document what someone will actually look up.
 - Keep docs next to the thing they describe when possible.
 

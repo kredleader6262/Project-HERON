@@ -218,6 +218,47 @@
 
     #clock { font-family: 'JetBrains Mono', monospace; color: var(--fg-dim); }
 
+    .global-safety-strip {
+      background: color-mix(in srgb, var(--surface) 88%, var(--bg));
+      border-bottom: 1px solid var(--line);
+    }
+    .global-safety-strip .inner {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 0.65rem 2rem 0.75rem;
+    }
+    .safety-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 0.45rem;
+    }
+    .safety-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+      gap: 0.45rem;
+    }
+    .safety-item {
+      min-width: 0;
+      padding: 0.45rem 0.55rem;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.015);
+    }
+    .safety-value {
+      margin-top: 0.1rem;
+      color: var(--fg);
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .safety-ok { color: var(--ok); }
+    .safety-warn { color: var(--warn); }
+    .safety-halt { color: var(--err); }
+    .safety-pending { color: var(--fg-muted); }
+
     /* ─────────────────────────────────────────────────────────
        MODE-AWARE ACCENT LINE — the visual thesis of the app
        A hairline under the status rail reflects the current mode.
@@ -456,26 +497,21 @@
     <div class="inner">
       <a href="/" class="wordmark">HERON</a>
       <nav class="nav">
-        <a href="/"           class="{% if active_path == '/' %}active{% endif %}">Mission</a>
-        <a href="/overview"   class="{% if active_path == '/overview' %}active{% endif %}">Overview</a>
-        <a href="/campaigns"  class="{% if active_path.startswith('/campaign') %}active{% endif %}">Campaigns</a>
-        <a href="/strategies" class="{% if active_path.startswith('/strateg') %}active{% endif %}">Strategies</a>
-        <a href="/proposals"  class="{% if active_path == '/proposals' %}active{% endif %}">
-          Inbox{% if sb.pending_strategies %}<span class="count">{{ sb.pending_strategies }}</span>{% endif %}
+        {% set approval_count = sb.pending_strategies + sb.pending_candidates %}
+        {% set is_mission = active_path == '/' or active_path == '/overview' %}
+        {% set is_desks = active_path.startswith('/desks') or active_path.startswith('/campaign') or active_path.startswith('/strateg') or active_path.startswith('/backtests') %}
+        {% set is_approvals = active_path.startswith('/approvals') or active_path.startswith('/proposals') or active_path.startswith('/candidate') %}
+        {% set is_activity = active_path.startswith('/activity') %}
+        {% set is_portfolio = active_path.startswith('/portfolio') or active_path.startswith('/trades') %}
+        {% set is_system = active_path.startswith('/system') or active_path.startswith('/actions') or active_path.startswith('/scheduler') or active_path.startswith('/agents') or active_path.startswith('/audits') or active_path.startswith('/data') or active_path.startswith('/policies') or active_path.startswith('/costs') or active_path.startswith('/resilience') or active_path.startswith('/setup') or active_path.startswith('/glossary') %}
+        <a href="/" class="{% if is_mission %}active{% endif %}">Mission</a>
+        <a href="/desks" class="{% if is_desks %}active{% endif %}">Desks</a>
+        <a href="/approvals" class="{% if is_approvals %}active{% endif %}">
+          Approvals{% if approval_count %}<span class="count">{{ approval_count }}</span>{% endif %}
         </a>
-        <a href="/trades"     class="{% if active_path == '/trades' %}active{% endif %}">Trades</a>
-        <a href="/candidates" class="{% if active_path == '/candidates' %}active{% endif %}">
-          Candidates{% if sb.pending_candidates %}<span class="count">{{ sb.pending_candidates }}</span>{% endif %}
-        </a>
-        <a href="/agents"     class="{% if active_path == '/agents' %}active{% endif %}">Agents</a>
-        <a href="/audits"     class="{% if active_path == '/audits' %}active{% endif %}">Audits</a>
-        <a href="/backtests"  class="{% if active_path.startswith('/backtests') %}active{% endif %}">Backtests</a>
-        <a href="/data/earnings" class="{% if active_path.startswith('/data') %}active{% endif %}">Data</a>
-        <a href="/portfolio"  class="{% if active_path == '/portfolio' %}active{% endif %}">Portfolio</a>
-        <a href="/policies"   class="{% if active_path.startswith('/policies') %}active{% endif %}">Policies</a>
-        <a href="/costs"      class="{% if active_path == '/costs' %}active{% endif %}">Costs</a>
-        <a href="/resilience" class="{% if active_path == '/resilience' %}active{% endif %}">Resilience</a>
-        <a href="/actions"    class="{% if active_path == '/actions' or active_path == '/scheduler' %}active{% endif %}">Actions</a>
+        <a href="/activity" class="{% if is_activity %}active{% endif %}">Activity</a>
+        <a href="/portfolio" class="{% if is_portfolio %}active{% endif %}">Portfolio</a>
+        <a href="/system" class="{% if is_system %}active{% endif %}">System</a>
       </nav>
     </div>
   </div>
@@ -483,13 +519,13 @@
   {# ── Status rail: mode + system + clock ─────────────────── #}
   <div class="rail-status">
     <div class="inner">
-      {# Mode segmented control #}
-      <div class="mode-seg" role="tablist" aria-label="View mode">
+      {# Trading / View Mode segmented control #}
+      <div class="mode-seg" role="tablist" aria-label="Trading Mode filter">
         {% for m in modes %}
         <form action="/mode/{{ m }}?next={{ active_path }}" method="post">
           <button type="submit"
                   class="{% if mode == m %}active{% endif %}"
-                  title="Switch to {{ m }} mode">{{ m }}</button>
+                  title="Switch Trading Mode filter to {{ m }}">{{ m }}</button>
         </form>
         {% endfor %}
       </div>
@@ -532,6 +568,8 @@
   </div>
 
   <div class="mode-line"></div>
+
+  {% include "_safety_strip.html" %}
 
   <main class="shell page">
     {% with messages = get_flashed_messages(with_categories=true) %}

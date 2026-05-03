@@ -120,6 +120,7 @@ class TestClassifier:
         }
         result = classify_article(article)
 
+        assert result is not None
         assert result["relevant"] is True
         assert result["relevance_score"] == 0.85
         assert result["sentiment"] == "positive"
@@ -208,6 +209,73 @@ class TestCandidateGenerator:
         assert row["ticker"] == "AAPL"
         assert row["source"] == "research_local"
         assert row["disposition"] == "pending"
+
+    def test_generate_candidates_links_signal_when_strategy_has_desk(self, journal_conn):
+        from heron.journal.campaigns import create_campaign
+        from heron.journal.signals import get_signal_for_candidate
+        from heron.research.candidates import generate_candidates
+
+        create_campaign(journal_conn, "research_desk", "Research Desk", state="ACTIVE")
+        journal_conn.execute("UPDATE strategies SET campaign_id='research_desk' WHERE id='pead_v1'")
+        journal_conn.commit()
+
+        ids = generate_candidates(journal_conn, [{
+            "article_id": "sig:1", "relevant": True, "relevance_score": 0.9,
+            "sentiment": "positive", "sentiment_score": 0.7, "tickers": ["AAPL"],
+            "category": "earnings", "rationale": "AAPL beat EPS",
+            "tokens_in": 200, "tokens_out": 80,
+        }], strategy_id="pead_v1")
+
+        assert len(ids) == 1
+        trace = get_signal_for_candidate(journal_conn, ids[0])
+        assert trace is not None
+        assert trace["campaign_id"] == "research_desk"
+        assert trace["bridge_source"] == "research"
+
+    def test_one_signal_can_feed_multiple_strategy_candidates(self, journal_conn):
+        from heron.journal.campaigns import create_campaign
+        from heron.journal.signals import list_signals, list_signal_candidates
+        from heron.journal.strategies import create_strategy
+        from heron.research.candidates import generate_candidates
+
+        create_campaign(journal_conn, "research_multi", "Research Multi", state="ACTIVE")
+        create_strategy(journal_conn, "sig_a", "Signal A", campaign_id="research_multi")
+        create_strategy(journal_conn, "sig_b", "Signal B", campaign_id="research_multi")
+        cls = [{
+            "article_id": "sig:multi", "relevant": True, "relevance_score": 0.92,
+            "sentiment": "positive", "sentiment_score": 0.75, "tickers": ["AAPL"],
+            "category": "earnings", "rationale": "AAPL beat EPS",
+        }]
+
+        ids = generate_candidates(journal_conn, cls, strategy_ids=["sig_a", "sig_b"])
+        assert len(ids) == 2
+        signals = list_signals(journal_conn, campaign_id="research_multi")
+        assert len(signals) == 1
+        bridges = list_signal_candidates(journal_conn, signal_id=signals[0]["id"])
+        assert sorted(b["candidate_id"] for b in bridges) == sorted(ids)
+
+        assert generate_candidates(journal_conn, cls, strategy_ids=["sig_a", "sig_b"]) == []
+        assert len(list_signals(journal_conn, campaign_id="research_multi")) == 1
+
+    @patch("heron.research.candidates.create_or_get_signal")
+    def test_signal_failure_does_not_block_candidate_creation(self, mock_signal, journal_conn):
+        from heron.journal.campaigns import create_campaign
+        from heron.journal.signals import get_signal_for_candidate
+        from heron.research.candidates import generate_candidates
+
+        mock_signal.side_effect = RuntimeError("signal down")
+        create_campaign(journal_conn, "research_degraded", "Research Degraded", state="ACTIVE")
+        journal_conn.execute("UPDATE strategies SET campaign_id='research_degraded' WHERE id='pead_v1'")
+        journal_conn.commit()
+
+        ids = generate_candidates(journal_conn, [{
+            "article_id": "sig:degraded", "relevant": True, "relevance_score": 0.9,
+            "sentiment": "positive", "sentiment_score": 0.7, "tickers": ["AAPL"],
+            "category": "earnings", "rationale": "AAPL beat EPS",
+        }], strategy_id="pead_v1")
+
+        assert len(ids) == 1
+        assert get_signal_for_candidate(journal_conn, ids[0]) is None
 
     def test_generate_candidates_filters_non_watchlist(self, journal_conn):
         from heron.research.candidates import generate_candidates

@@ -10,6 +10,7 @@ from flask import Flask, render_template, request, redirect, url_for, abort, fla
 from heron.journal import get_journal_conn, init_journal
 from heron.journal.strategies import list_strategies, get_strategy, get_state_history, transition_strategy, create_strategy
 from heron.journal.candidates import list_candidates, get_candidate, dispose_candidate
+from heron.journal.signals import get_signal_for_candidate, list_signals
 from heron.journal.trades import list_trades, get_wash_sale_exposure, get_pdt_count
 from heron.journal.ops import get_monthly_cost, get_daily_costs, get_events, get_review, get_audits, is_review_current, log_event
 from heron.journal import campaigns as jcampaigns
@@ -19,6 +20,55 @@ from heron.dashboard import mode as vmode
 import os
 import secrets
 import threading
+
+
+DEFAULT_DESK_ID = "default_paper"
+DEFAULT_DESK_ROUTE_ID = "default"
+DEFAULT_DESK_NAME = "PEAD Desk"
+DEFAULT_DESK_DESCRIPTION = (
+    "Default Post-Earnings Drift desk for the initial paper workflow and "
+    "orphan-strategy backfill."
+)
+
+
+def _resolve_campaign_id(campaign_id):
+    return DEFAULT_DESK_ID if campaign_id == DEFAULT_DESK_ROUTE_ID else campaign_id
+
+
+def _desk_route_id(campaign_id):
+    return DEFAULT_DESK_ROUTE_ID if campaign_id == DEFAULT_DESK_ID else campaign_id
+
+
+def _present_campaign(row):
+    desk = dict(row)
+    is_default = desk.get("id") == DEFAULT_DESK_ID
+    desk["is_default_desk"] = is_default
+    desk["desk_route_id"] = _desk_route_id(desk.get("id"))
+    desk["display_id"] = DEFAULT_DESK_ROUTE_ID if is_default else desk.get("id")
+    desk["display_name"] = DEFAULT_DESK_NAME if is_default else (desk.get("name") or desk.get("id"))
+    desk["display_description"] = (
+        DEFAULT_DESK_DESCRIPTION if is_default else (desk.get("description") or "")
+    )
+    return desk
+
+
+def _present_strategy(row):
+    strategy = dict(row)
+    campaign_id = strategy.get("campaign_id")
+    strategy["desk_route_id"] = _desk_route_id(campaign_id) if campaign_id else None
+    if campaign_id == DEFAULT_DESK_ID:
+        strategy["desk_display_name"] = DEFAULT_DESK_NAME
+    else:
+        strategy["desk_display_name"] = strategy.get("desk_campaign_name") or campaign_id
+    return strategy
+
+
+def _desk_label(campaign_id):
+    return DEFAULT_DESK_NAME if campaign_id == DEFAULT_DESK_ID else campaign_id
+
+
+def _desk_error(exc):
+    return str(exc).replace("Campaign ", "Desk ")
 
 
 def _market_session():
@@ -49,6 +99,7 @@ def _status_bar(conn, mode="all"):
     Budget + session + PROPOSED inbox are global (mode-independent) by design.
     """
     from heron.config import MONTHLY_COST_CEILING
+    from heron.util import trading_day_start_utc_iso
     try:
         mtd = get_monthly_cost(conn) or 0.0
     except Exception:
@@ -96,10 +147,85 @@ def _status_bar(conn, mode="all"):
     except Exception:
         wash_count = 0
 
+    try:
+        pdt_count = None if mode == "paper" else get_pdt_count(conn, mode="live")
+    except Exception:
+        pdt_count = None
+
+    tmode = vmode.trade_mode(mode)
+    try:
+        today = trading_day_start_utc_iso()
+        trades = list_trades(conn, mode=tmode)
+        daily_pnl = sum(
+            (t["pnl"] or 0.0) for t in trades
+            if t["close_filled_at"] and t["close_filled_at"] >= today
+        )
+        daily_loss_used = abs(daily_pnl) if daily_pnl < 0 else 0.0
+    except Exception:
+        daily_pnl = 0.0
+        daily_loss_used = 0.0
+
+    try:
+        gross_exposure = 0.0
+        net_exposure = 0.0
+        for t in list_trades(conn, open_only=True, mode=tmode):
+            qty = float(t["fill_qty"] or t["qty"] or 0.0)
+            price = float(t["fill_price"] or t["limit_price"] or 0.0)
+            notional = qty * price
+            gross_exposure += abs(notional)
+            net_exposure += -notional if t["side"] == "sell" else notional
+    except Exception:
+        gross_exposure = 0.0
+        net_exposure = 0.0
+
+    try:
+        from heron.strategy.policy import current_system_mode
+        system_mode = current_system_mode(conn)
+    except Exception:
+        system_mode = "NORMAL"
+
+    try:
+        review_current = is_review_current(conn)
+    except Exception:
+        review_current = False
+
+    try:
+        from heron.research.audit import compute_trust_score
+        trust = compute_trust_score(conn)
+        trust_score = trust.get("trust_score") if isinstance(trust, dict) else trust
+        trust_sample_size = trust.get("sample_size") if isinstance(trust, dict) else None
+    except Exception:
+        trust_score = None
+        trust_sample_size = None
+
+    try:
+        row = conn.execute(
+            """SELECT event_type, severity, message, created_at FROM events
+               WHERE event_type IN ('reconciliation_drift', 'startup_audit')
+               ORDER BY created_at DESC LIMIT 1"""
+        ).fetchone()
+        if not row:
+            reconciliation = {"state": "pending", "label": "data pending audit"}
+        elif row["event_type"] == "reconciliation_drift" or row["severity"] in ("warn", "error"):
+            reconciliation = {"state": "warn", "label": "drift logged"}
+        else:
+            reconciliation = {"state": "ok", "label": "latest audit logged"}
+    except Exception:
+        reconciliation = {"state": "pending", "label": "data pending audit"}
+
+    if not review_current:
+        promotion_gate = {"state": "warn", "label": "review due"}
+    elif system_mode == "SAFE":
+        promotion_gate = {"state": "halt", "label": "blocked in SAFE"}
+    elif system_mode == "DERISK":
+        promotion_gate = {"state": "warn", "label": "restricted in DERISK"}
+    else:
+        promotion_gate = {"state": "pending", "label": "per-strategy parity"}
+
     # Overall system state: HALT if cost tripped, WARN if warnings present, else OK.
-    if cost_state == "halt":
+    if cost_state == "halt" or system_mode == "SAFE":
         system = "halt"
-    elif cost_state == "warn" or wash_count > 0:
+    elif cost_state == "warn" or wash_count > 0 or system_mode == "DERISK" or not review_current:
         system = "warn"
     else:
         system = "ok"
@@ -114,6 +240,19 @@ def _status_bar(conn, mode="all"):
         "pending_candidates": pending_candidates,
         "pending_strategies": pending_strategies,
         "wash_count": wash_count,
+        "pdt_count": pdt_count,
+        "daily_pnl": daily_pnl,
+        "daily_loss_used": daily_loss_used,
+        "gross_exposure": gross_exposure,
+        "net_exposure": net_exposure,
+        "buying_power": None,
+        "reconciliation": reconciliation,
+        "broker_api_health": {"state": "pending", "label": "data pending broker check"},
+        "system_mode": system_mode,
+        "trust_score": trust_score,
+        "trust_sample_size": trust_sample_size,
+        "review_current": review_current,
+        "promotion_gate": promotion_gate,
     }
 
 
@@ -138,7 +277,14 @@ def create_app():
         except Exception:
             status = {"session": "unknown", "system": "ok", "cost_state": "ok",
                       "mtd": 0.0, "ceiling": 45.0, "pct": 0.0,
-                      "pending_candidates": 0, "pending_strategies": 0, "wash_count": 0}
+                      "pending_candidates": 0, "pending_strategies": 0, "wash_count": 0,
+                      "pdt_count": None, "daily_pnl": 0.0, "daily_loss_used": 0.0,
+                      "gross_exposure": 0.0, "net_exposure": 0.0, "buying_power": None,
+                      "reconciliation": {"state": "pending", "label": "data pending audit"},
+                      "broker_api_health": {"state": "pending", "label": "data pending broker check"},
+                      "system_mode": "NORMAL", "trust_score": None, "trust_sample_size": None,
+                      "review_current": False,
+                      "promotion_gate": {"state": "pending", "label": "per-strategy parity"}}
         return {
             "status_bar": status,
             "active_path": request.path if request else "/",
@@ -203,6 +349,110 @@ def create_app():
                                month_cost=month_cost,
                                events=events)
 
+    @app.route("/desks")
+    def desks_view():
+        """Section shell for Desk workspaces backed by campaigns."""
+        conn = get_conn()
+        rows = jcampaigns.list_campaigns(conn)
+        desks = []
+        for r in rows:
+            d = _present_campaign(r)
+            d["days"] = jcampaigns.days_active(conn, r["id"])
+            d["strategy_count"] = conn.execute(
+                "SELECT COUNT(*) FROM strategies WHERE campaign_id=?", (r["id"],)
+            ).fetchone()[0]
+            d["open_trades"] = conn.execute(
+                """SELECT COUNT(*) FROM trades t
+                   JOIN strategies s ON s.id = t.strategy_id
+                   WHERE s.campaign_id=? AND t.close_price IS NULL""",
+                (r["id"],),
+            ).fetchone()[0]
+            desks.append(d)
+        conn.close()
+        return render_template("desks.html", desks=desks)
+
+    @app.route("/approvals")
+    def approvals_view():
+        """Section shell for human decision queues."""
+        conn = get_conn()
+        proposed = list_strategies(conn, state="PROPOSED")
+        candidates = conn.execute(
+            """SELECT c.*, s.name AS strategy_name, s.state AS strategy_state
+               FROM candidates c JOIN strategies s ON s.id = c.strategy_id
+               WHERE c.disposition='pending'
+               ORDER BY c.created_at DESC LIMIT 25"""
+        ).fetchall()
+        review_ok = is_review_current(conn)
+        promotion_events = conn.execute(
+            """SELECT * FROM events
+               WHERE event_type IN ('promotion_blocked', 'promotion_force')
+               ORDER BY created_at DESC LIMIT 10"""
+        ).fetchall()
+        conn.close()
+        return render_template(
+            "approvals.html",
+            proposed=proposed,
+            candidates=candidates,
+            review_ok=review_ok,
+            promotion_events=promotion_events,
+        )
+
+    @app.route("/activity")
+    def activity_view():
+        """Read-only aggregate activity surface; /actions remains scheduler control."""
+        conn = get_conn()
+        events = get_events(conn, limit=25)
+        runs = conn.execute(
+            "SELECT * FROM scheduler_runs ORDER BY started_at DESC LIMIT 25"
+        ).fetchall()
+        recent_candidates = conn.execute(
+            "SELECT * FROM candidates ORDER BY created_at DESC LIMIT 10"
+        ).fetchall()
+        recent_trades = list_trades(conn, mode=vmode.trade_mode(vmode.get_mode()))[:10]
+        history = []
+        for e in events:
+            d = dict(e)
+            history.append({
+                "ts": d.get("created_at"), "kind": "event", "type": d.get("event_type"),
+                "severity": d.get("severity") or "info", "source": d.get("source") or "journal",
+                "message": d.get("message") or "",
+            })
+        for r in runs:
+            d = dict(r)
+            history.append({
+                "ts": d.get("started_at"), "kind": "job", "type": d.get("job_id"),
+                "severity": "error" if d.get("status") == "error" else "info",
+                "source": "supervisor",
+                "message": d.get("result_summary") or d.get("error") or f"status={d.get('status')}",
+            })
+        history.sort(key=lambda x: x["ts"] or "", reverse=True)
+        conn.close()
+        return render_template(
+            "activity.html",
+            history=history[:40],
+            recent_candidates=recent_candidates,
+            recent_trades=recent_trades,
+        )
+
+    @app.route("/system")
+    def system_view():
+        """System section split into Operations, Configuration, and Introspection."""
+        from heron.runtime.supervisor import DEFAULT_JOBS
+
+        conn = get_conn()
+        recent_events = get_events(conn, limit=10)
+        recent_commands = conn.execute(
+            "SELECT * FROM scheduler_commands ORDER BY id DESC LIMIT 5"
+        ).fetchall()
+        job_count = len(DEFAULT_JOBS)
+        conn.close()
+        return render_template(
+            "system.html",
+            recent_events=recent_events,
+            recent_commands=recent_commands,
+            job_count=job_count,
+        )
+
     def mission_control():
         """Inbox / Actions / State — the unified operator surface (C1+C2)."""
         from heron.config import MONTHLY_COST_CEILING
@@ -235,7 +485,7 @@ def create_app():
 
         sys_mode = current_system_mode(conn)
         try:
-            pol_state = assemble_state(conn, mode=tmode)
+            pol_state = assemble_state(conn, mode=tmode or "")
             pol_actions = evaluate_policies(pol_state)
         except Exception:
             pol_state, pol_actions = {}, []
@@ -313,8 +563,11 @@ def create_app():
         states = vmode.strategy_states(m)
         clause, params = vmode.in_clause(states)
         strategies = conn.execute(
-            f"SELECT * FROM strategies WHERE state {clause} ORDER BY created_at", params,
+            f"""SELECT s.*, c.name AS desk_campaign_name
+                FROM strategies s LEFT JOIN campaigns c ON c.id=s.campaign_id
+                WHERE s.state {clause} ORDER BY s.created_at""", params,
         ).fetchall()
+        strategies = [_present_strategy(s) for s in strategies]
         conn.close()
         return render_template("strategies.html", strategies=strategies)
 
@@ -377,7 +630,7 @@ def create_app():
             "JOIN strategies s ON s.id = c.strategy_id "
             f"WHERE s.state {clause}"
         )
-        qparams = list(params)
+        qparams: list[object] = list(params)
         if disposition:
             sql += " AND c.disposition=?"
             qparams.append(disposition)
@@ -543,7 +796,7 @@ def create_app():
                                    already=already, plan=None, applied=None,
                                    form={
                                        "capital": "500",
-                                       "campaign_name": "Default Paper Campaign",
+                                       "campaign_name": DEFAULT_DESK_NAME,
                                        "cadence": "premarket_eod",
                                        "max_capital_pct": "0.15",
                                        "max_positions": "3",
@@ -554,7 +807,7 @@ def create_app():
         action = request.form.get("action", "plan")
         form = {
             "capital": request.form.get("capital", "500"),
-            "campaign_name": request.form.get("campaign_name", "Default Paper Campaign"),
+            "campaign_name": request.form.get("campaign_name", DEFAULT_DESK_NAME),
             "cadence": request.form.get("cadence", "premarket_eod"),
             "max_capital_pct": request.form.get("max_capital_pct", "0.15"),
             "max_positions": request.form.get("max_positions", "3"),
@@ -583,7 +836,7 @@ def create_app():
             else:
                 try:
                     applied = apply_initial_setup(conn, plan)
-                    flash(f"Setup complete: {applied['campaign_id']} "
+                    flash(f"Setup complete: Desk {applied['campaign_id']} "
                           f"with {len(applied['strategy_ids'])} strategies.",
                           "success")
                 except SetupAlreadyDoneError as e:
@@ -708,9 +961,11 @@ def create_app():
             "SELECT * FROM audits WHERE candidate_id=? ORDER BY created_at DESC",
             (candidate_id,),
         ).fetchall()
+        signal_trace = get_signal_for_candidate(conn, candidate_id)
         conn.close()
         return render_template("candidate_detail.html",
-                               c=cand, audits=related_audits)
+                               c=cand, audits=related_audits,
+                               signal_trace=signal_trace)
 
     @app.route("/backtests")
     def backtests_view():
@@ -1434,7 +1689,7 @@ def create_app():
         conn.close()
         return redirect(url_for("candidates_view"))
 
-    # ── Campaigns ──────────────────────────────────────────────────────────
+    # ── Desks / Campaign compatibility ─────────────────────────────────────
 
     @app.route("/campaigns")
     def campaigns_view():
@@ -1442,7 +1697,7 @@ def create_app():
         rows = jcampaigns.list_campaigns(conn)
         items = []
         for r in rows:
-            d = dict(r)
+            d = _present_campaign(r)
             d["days"] = jcampaigns.days_active(conn, r["id"])
             d["strategy_count"] = conn.execute(
                 "SELECT COUNT(*) FROM strategies WHERE campaign_id=?", (r["id"],)
@@ -1451,8 +1706,7 @@ def create_app():
         conn.close()
         return render_template("campaigns.html", campaigns=items)
 
-    @app.route("/campaign/new", methods=["GET", "POST"])
-    def campaign_new():
+    def _campaign_new_response():
         if request.method == "POST":
             conn = get_conn()
             cid = (request.form.get("id") or "").strip()
@@ -1460,7 +1714,11 @@ def create_app():
             if not cid or not name:
                 flash("ID and name required.", "error")
                 conn.close()
-                return redirect(url_for("campaign_new"))
+                return redirect(url_for("desk_new"))
+            if cid == DEFAULT_DESK_ROUTE_ID:
+                flash("Desk ID 'default' is reserved for the PEAD Desk alias.", "error")
+                conn.close()
+                return redirect(url_for("desk_new"))
             try:
                 jcampaigns.create_campaign(
                     conn, cid, name,
@@ -1469,24 +1727,37 @@ def create_app():
                     capital_allocation_usd=float(request.form.get("capital", 500)),
                     paper_window_days=int(request.form.get("paper_window_days", 90)),
                 )
-                flash(f"Campaign {cid} created (DRAFT).", "success")
+                flash(f"Desk {_desk_label(cid)} created (DRAFT).", "success")
                 conn.close()
-                return redirect(url_for("campaign_detail", campaign_id=cid))
-            except (ValueError, Exception) as e:
-                flash(str(e), "error")
+                return redirect(url_for("desk_detail", campaign_id=_desk_route_id(cid)))
+            except ValueError as e:
+                flash(_desk_error(e), "error")
+                conn.close()
+            except Exception:
+                flash("Could not create Desk. Check the ID and try again.", "error")
                 conn.close()
         return render_template("campaign_new.html")
 
-    @app.route("/campaign/<campaign_id>")
-    def campaign_detail(campaign_id):
+    @app.route("/desk/new", methods=["GET", "POST"])
+    def desk_new():
+        return _campaign_new_response()
+
+    @app.route("/campaign/new", methods=["GET", "POST"])
+    def campaign_new():
+        return _campaign_new_response()
+
+    def _campaign_detail_response(campaign_id):
+        campaign_id = _resolve_campaign_id(campaign_id)
         conn = get_conn()
         c = jcampaigns.get_campaign(conn, campaign_id)
         if not c:
             conn.close()
             abort(404)
+        c = _present_campaign(c)
         strats = jcampaigns.get_campaign_strategies(conn, campaign_id)
         history = jcampaigns.get_state_history(conn, campaign_id)
         days = jcampaigns.days_active(conn, campaign_id)
+        signals = list_signals(conn, campaign_id=campaign_id, limit=10)
         # Trades for any strategy in this campaign
         trades = []
         if strats:
@@ -1498,10 +1769,38 @@ def create_app():
         conn.close()
         return render_template("campaign_detail.html",
                                campaign=c, strategies=strats, history=history,
-                               trades=trades, days=days)
+                               trades=trades, days=days, signals=signals)
 
-    @app.route("/campaign/<campaign_id>/<action>", methods=["POST"])
-    def campaign_transition(campaign_id, action):
+    @app.route("/desk/<campaign_id>")
+    def desk_detail(campaign_id):
+        return _campaign_detail_response(campaign_id)
+
+    @app.route("/desk/<campaign_id>/signals")
+    def desk_signals(campaign_id):
+        campaign_id = _resolve_campaign_id(campaign_id)
+        conn = get_conn()
+        c = jcampaigns.get_campaign(conn, campaign_id)
+        if not c:
+            conn.close()
+            abort(404)
+        c = _present_campaign(c)
+        signals = list_signals(conn, campaign_id=campaign_id)
+        conn.close()
+        return render_template("desk_signals.html", campaign=c, signals=signals)
+
+    @app.route("/desks/<campaign_id>")
+    def desks_detail_alias(campaign_id):
+        return redirect(
+            url_for("desk_detail", campaign_id=_desk_route_id(_resolve_campaign_id(campaign_id))),
+            code=302,
+        )
+
+    @app.route("/campaign/<campaign_id>")
+    def campaign_detail(campaign_id):
+        return _campaign_detail_response(campaign_id)
+
+    def _campaign_transition_response(campaign_id, action):
+        campaign_id = _resolve_campaign_id(campaign_id)
         target = {"start": "ACTIVE", "pause": "PAUSED", "resume": "ACTIVE",
                   "graduate": "GRADUATED", "retire": "RETIRED"}.get(action)
         if not target:
@@ -1513,11 +1812,19 @@ def create_app():
                 reason=request.form.get("reason", f"Operator {action}"),
                 operator="operator",
             )
-            flash(f"Campaign {campaign_id} → {target}", "success")
+            flash(f"Desk {_desk_label(campaign_id)} -> {target}", "success")
         except ValueError as e:
-            flash(str(e), "error")
+            flash(_desk_error(e), "error")
         conn.close()
-        return redirect(url_for("campaign_detail", campaign_id=campaign_id))
+        return redirect(url_for("desk_detail", campaign_id=_desk_route_id(campaign_id)))
+
+    @app.route("/desk/<campaign_id>/<action>", methods=["POST"])
+    def desk_transition(campaign_id, action):
+        return _campaign_transition_response(campaign_id, action)
+
+    @app.route("/campaign/<campaign_id>/<action>", methods=["POST"])
+    def campaign_transition(campaign_id, action):
+        return _campaign_transition_response(campaign_id, action)
 
     # ── New strategy from template ─────────────────────────────────────────
 
@@ -1532,6 +1839,7 @@ def create_app():
             sid = (request.form.get("id") or "").strip()
             name = (request.form.get("name") or "").strip()
             campaign_id = (request.form.get("campaign_id") or "").strip() or None
+            campaign_id = _resolve_campaign_id(campaign_id) if campaign_id else None
             if not sid or not name or not template:
                 flash("ID, name, and template required.", "error")
                 conn.close()
@@ -1562,7 +1870,7 @@ def create_app():
         return render_template(
             "strategy_new.html",
             templates=templates, template=template,
-            campaigns=list(active_campaigns) + list(draft_campaigns),
+            campaigns=[_present_campaign(c) for c in list(active_campaigns) + list(draft_campaigns)],
             form=request.form,
         )
 
@@ -1571,6 +1879,8 @@ def create_app():
         """HTMX endpoint: show resolved config from current form values."""
         name = request.form.get("template")
         try:
+            if not name:
+                raise ValueError("Template required")
             t = stemplates.get_template(name)
             overrides = {f.key: request.form.get(f.key) for f in t.param_schema
                          if request.form.get(f.key) not in (None, "")}

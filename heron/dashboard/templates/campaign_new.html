@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}New Campaign — HERON{% endblock %}
+{% block title %}New Desk - HERON{% endblock %}
 {% block content %}
 <div class="page-head">
-  <div><h1>New Campaign</h1>
-    <p class="lede">Campaigns own the paper window clock, capital allocation, and graduation lineage.</p></div>
+  <div><h1>New Desk</h1>
+    <p class="lede">Desks own the paper window clock, capital allocation, and graduation lineage.</p></div>
 </div>
 
-<form method="post" class="card p-5" style="max-width: 720px;">
+<form method="post" action="{{ url_for('desk_new') }}" class="card p-5" style="max-width: 720px;">
   <div class="grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-    <label>ID
-      <input class="input mono" name="id" placeholder="campaign_pead_q1"
+    <label>Desk ID
+      <input class="input mono" name="id" placeholder="pead_q1_paper"
              pattern="[a-z0-9_]+" required />
       <div class="hint">lowercase, underscores; permanent</div>
     </label>
@@ -34,9 +34,9 @@
   </label>
 
   <div style="margin-top:1.25rem; display:flex; gap:.5rem;">
-    <button class="btn btn-primary" type="submit">Create (DRAFT)</button>
-    <a class="btn" href="{{ url_for('campaigns_view') }}">Cancel</a>
+    <button class="btn btn-primary" type="submit">Create Desk (DRAFT)</button>
+    <a class="btn" href="{{ url_for('desks_view') }}">Cancel</a>
   </div>
-  <div class="hint" style="margin-top:.5rem;">Campaign starts in DRAFT. Activate from the detail page to start the clock.</div>
+  <div class="hint" style="margin-top:.5rem;">Desk starts in DRAFT. Activate from the detail page to start the clock.</div>
 </form>
 {% endblock %}

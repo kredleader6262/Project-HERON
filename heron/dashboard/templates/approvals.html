@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Approvals - HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>Approvals</h1>
+    <p class="lede">Human decision queues. Existing approval routes and gates stay in place.</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/proposals" class="btn">Strategy proposals</a>
+    <a href="/candidates?disposition=pending" class="btn btn-primary">Pending candidates</a>
+  </div>
+</div>
+
+<div class="stat-row mb-6">
+  <div class="stat">
+    <div class="stat-label">Proposals</div>
+    <div class="stat-value num">{{ proposed|length }}</div>
+    <div class="stat-sub">approve/reject on /proposals or strategy detail</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Candidates</div>
+    <div class="stat-value num">{{ candidates|length }}</div>
+    <div class="stat-sub">accept/reject on /candidates or candidate detail</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Monthly review</div>
+    <div class="stat-value {% if review_ok %}safety-ok{% else %}safety-warn{% endif %}">{{ 'Current' if review_ok else 'Due' }}</div>
+    <div class="stat-sub">promotion gate reads the existing review record</div>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-6">
+  <div>
+    <div class="section-title">Strategy proposal queue</div>
+    <div class="card overflow-hidden">
+      {% if proposed %}
+      <table class="htable">
+        <thead><tr><th>ID</th><th>Name</th><th>State</th></tr></thead>
+        <tbody>
+        {% for s in proposed %}
+          <tr>
+            <td><a class="link mono" href="/strategy/{{ s.id }}">{{ s.id }}</a></td>
+            <td>{{ s.name }}</td>
+            <td><span class="pill s-{{ s.state }}">{{ s.state }}</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No strategy proposals waiting.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Candidate queue</div>
+    <div class="card overflow-hidden">
+      {% if candidates %}
+      <table class="htable">
+        <thead><tr><th>ID</th><th>Ticker</th><th>Strategy</th><th class="r">Score</th></tr></thead>
+        <tbody>
+        {% for c in candidates %}
+          <tr>
+            <td><a class="link mono" href="/candidate/{{ c.id }}">#{{ c.id }}</a></td>
+            <td class="mono font-semibold">{{ c.ticker }}</td>
+            <td>{{ c.strategy_name or c.strategy_id }}</td>
+            <td class="r num">{{ "%.2f"|format(c.final_score or c.local_score or 0) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No candidates waiting.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="section-title">Recent promotion gate events</div>
+<div class="card overflow-hidden">
+  {% if promotion_events %}
+  <table class="htable">
+    <thead><tr><th>When</th><th>Type</th><th>Message</th></tr></thead>
+    <tbody>
+    {% for e in promotion_events %}
+      <tr>
+        <td class="mono dim">{{ e.created_at }}</td>
+        <td><span class="pill pill-warn">{{ e.event_type }}</span></td>
+        <td>{{ e.message }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty empty-hint">No promotion gate events logged.</div>
+  {% endif %}
+</div>
+{% endblock %}

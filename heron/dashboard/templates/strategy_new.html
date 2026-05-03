@@ -34,11 +34,11 @@
     <label>Name
       <input class="input" name="name" placeholder="PEAD with tighter stops" required />
     </label>
-    <label>Campaign
+    <label>Desk
       <select class="input" name="campaign_id">
         <option value="">— none —</option>
         {% for c in campaigns %}
-          <option value="{{ c.id }}">{{ c.id }} · {{ c.name }} ({{ c.state }})</option>
+          <option value="{{ c.desk_route_id }}">{{ c.display_name }} ({{ c.state }})</option>
         {% endfor %}
       </select>
     </label>

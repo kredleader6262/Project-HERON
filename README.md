@@ -8,7 +8,7 @@ An LLM-augmented algorithmic trading system on a $500 seed account. The LLM rese
 
 A learning-first system that uses local and API language models to surface trading candidates, then validates and executes them through strict rule-based code with hard risk limits. Every decision is journaled. Every strategy runs against a deterministic baseline before touching real money.
 
-**Full spec:** [`Project-HERON.md`](Project-HERON.md)
+**Canonical spec:** [`Project-HERON-v4.md`](Project-HERON-v4.md). [`Project-HERON-v3.md`](Project-HERON-v3.md) remains in the repo as historical reference; engineer-facing v4 summaries live in [`docs/CANONICAL_ARCHITECTURE.md`](docs/CANONICAL_ARCHITECTURE.md), [`docs/DOMAIN_MODEL.md`](docs/DOMAIN_MODEL.md), and [`docs/UI_INFORMATION_ARCHITECTURE.md`](docs/UI_INFORMATION_ARCHITECTURE.md).
 
 ## Stack
 
@@ -37,7 +37,7 @@ pip install -e ".[dev]"
 cp .env.example .env          # fill in API keys
 ```
 
-For the full bootstrap (Ollama, Alpaca account, Discord, etc.) see [`Project-HERON.md` Section 18](Project-HERON.md).
+For the full bootstrap (Ollama, Alpaca account, Discord, etc.) see [`Project-HERON-v4.md` Section 18](Project-HERON-v4.md).
 
 ## Quick Start
 
@@ -48,8 +48,8 @@ The dashboard is the primary surface; the CLI is the scripting alternative. Most
 heron dashboard                  # http://127.0.0.1:5001
 heron dashboard --lan            # listen on LAN; prints the phone-accessible URL
 
-# 2. Visit /setup in the browser — first-run wizard creates your initial paper
-#    campaign, the PEAD strategy, and its deterministic baseline.
+# 2. Visit /setup in the browser — first-run wizard creates your initial PEAD
+#    Desk, the PEAD strategy, and its deterministic baseline.
 #    (CLI equivalent: `heron init`)
 
 # 3. From the dashboard you can run research, kick off backtests, queue scheduled
@@ -168,10 +168,12 @@ The dashboard runs as a separate process — see [`heron.dashboard`](heron/dashb
 
 **Milestones 1–15.5 complete.** See [`ROADMAP.md`](ROADMAP.md) for full progress.
 
+Spec status: [`Project-HERON-v4.md`](Project-HERON-v4.md) is canonical, while [`Project-HERON-v3.md`](Project-HERON-v3.md) is historical reference. Stage 0 reconciliation corrected the suite count to 518 tests collected and the schema scope to 13 journal + 5 cache tables after migrations.
+
 | Milestone | What | Tests |
 |---|---|---|
 | M1 Data Layer | OHLCV/news fetch, cache, sanitizer, RSS | 48 |
-| M2 Journal Schema | 10-table SQLite schema, CRUD, state machine | 47 |
+| M2 Journal Schema | 13 journal + 5 cache SQLite tables after migrations, CRUD, state machine | 47 |
 | M3 Strategy Framework | Base class, 8 risk checks, position sizing | 33 |
 | M4 PEAD Strategy | Post-earnings drift screen/levels/exit | 20 |
 | M5 Execution Layer | Broker adapter, executor, virtual stops, reconciliation | 11 |
@@ -185,6 +187,6 @@ The dashboard runs as a separate process — see [`heron.dashboard`](heron/dashb
 | M13 Backtester | Deterministic replay, cost model, memorization flag, `/backtests` | 15 |
 | M14 Cost Controls | `cost_guard` (projection, warn/trip), Discord alerts, `/costs` | 14 |
 | M15 Resilience | Startup audit, graceful shutdown, secrets hygiene, `/resilience` | 20 |
-| M15.5 Campaigns + Supervisor | Campaigns, templates, APScheduler `heron run`, `/campaigns`, `/actions` | 59 |
+| M15.5 Campaign/Desk Substrate + Supervisor | Campaign substrate, Desk UI, templates, APScheduler `heron run`, `/desks`, `/campaigns` compatibility, `/actions` | 59 |
 
-**515 tests passing.** Integration tests pending API keys.
+**518 tests collected.** Integration tests pending API keys.

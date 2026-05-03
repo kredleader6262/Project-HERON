@@ -64,6 +64,7 @@ def mirror_candidate_to_baseline(conn, candidate_id, baseline_strategy_id):
     Returns the new baseline candidate_id, or None if already mirrored.
     """
     from heron.journal.candidates import get_candidate, create_candidate
+    from heron.journal.signals import get_signal_for_candidate, link_signal_candidate
 
     orig = get_candidate(conn, candidate_id)
     if not orig:
@@ -77,6 +78,12 @@ def mirror_candidate_to_baseline(conn, candidate_id, baseline_strategy_id):
         (baseline_strategy_id, orig["ticker"]),
     ).fetchone()
     if existing:
+        upstream = get_signal_for_candidate(conn, candidate_id)
+        if upstream and not get_signal_for_candidate(conn, existing["id"]):
+            link_signal_candidate(
+                conn, upstream["signal_id"], existing["id"], baseline_strategy_id,
+                bridge_source="baseline_mirror",
+            )
         return existing["id"]
 
     ctx = {}
@@ -94,6 +101,10 @@ def mirror_candidate_to_baseline(conn, candidate_id, baseline_strategy_id):
         thesis=f"[BASELINE] {orig['thesis'] or ''}",
         context_json=json.dumps(ctx),
     )
+    upstream = get_signal_for_candidate(conn, candidate_id)
+    if upstream:
+        link_signal_candidate(conn, upstream["signal_id"], cid, baseline_strategy_id,
+                              bridge_source="baseline_mirror")
     return cid
 
 

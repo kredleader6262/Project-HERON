@@ -3,7 +3,7 @@ description: "Use when: writing or modifying research layer, LLM integration, Ol
 ---
 # Research Layer Rules
 
-Full specs in `Project-HERON.md` Sections 4.2, 6, 7.
+Full specs in `Project-HERON-v4.md` Sections 4.2, 6, 7.
 
 ## LLM Routing
 

@@ -1,6 +1,11 @@
 """Tests for executor-cycle orchestration."""
 
+import pytest
+
 from heron.execution.cycle import run_executor_cycle
+from heron.journal.campaigns import create_campaign
+from heron.journal.candidates import create_candidate, dispose_candidate
+from heron.journal.signals import create_signal, link_signal_candidate
 from heron.journal.strategies import create_strategy, transition_strategy
 
 
@@ -37,3 +42,21 @@ def test_strategy_skip_event_is_deduped(conn):
     ).fetchall()
     assert len(rows) == 1
     assert rows[0]["message"] == "custom: missing template"
+
+
+@pytest.mark.parametrize("with_signal", [False, True])
+def test_accepted_candidate_cycle_ignores_signal_layer(conn, with_signal):
+    create_campaign(conn, "cycle_desk", "Cycle Desk", state="ACTIVE")
+    create_strategy(conn, "pead_cycle", "PEAD Cycle", campaign_id="cycle_desk", template="pead")
+    transition_strategy(conn, "pead_cycle", "PAPER", reason="test")
+    cid = create_candidate(conn, "pead_cycle", "AAPL", thesis="accepted", context_json="{}")
+    dispose_candidate(conn, cid, "accepted")
+    if with_signal:
+        sid = create_signal(conn, "cycle_desk", "research_local", "earnings", "long_bias",
+                            "AAPL beat", ticker="AAPL")
+        link_signal_candidate(conn, sid, cid, "pead_cycle")
+
+    summary = run_executor_cycle(conn, mode="paper", broker=Broker())
+
+    assert summary["errors"] == []
+    assert summary["strategies"] == 1

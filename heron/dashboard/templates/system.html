@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}System - HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <h1>System</h1>
+    <p class="lede">Operations, Configuration, and Introspection surfaces without changing their routes.</p>
+  </div>
+  <div class="flex gap-2">
+    <a href="/actions" class="btn btn-primary">Actions</a>
+    <a href="/resilience#health" class="btn">Health</a>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-5 mb-6">
+  <section id="operations" class="card p-4">
+    <div class="section-title">Operations</div>
+    <div style="display: grid; gap: 0.65rem;">
+      <a href="/resilience" class="link">Resilience</a>
+      <a href="/resilience#health" class="link">Health</a>
+      <a href="/costs" class="link">Costs</a>
+      <a href="/actions" class="link">Schedules and Actions</a>
+      <a href="/scheduler" class="link">Legacy Scheduler alias</a>
+    </div>
+    <p class="empty-hint mt-4">{{ job_count }} scheduler jobs known. Broker status and monthly review history use existing event/review data as it lands.</p>
+  </section>
+
+  <section id="configuration" class="card p-4">
+    <div class="section-title">Configuration</div>
+    <div style="display: grid; gap: 0.65rem;">
+      <a href="/policies" class="link">Policies and risk limits</a>
+      <a href="/setup" class="link">First-run setup</a>
+      <a href="/data/earnings" class="link">Data: earnings</a>
+      <a href="/data/universe" class="link">Data: universe</a>
+      <a href="/glossary" class="link">Glossary</a>
+    </div>
+  </section>
+
+  <section id="introspection" class="card p-4">
+    <div class="section-title">Introspection</div>
+    <div style="display: grid; gap: 0.65rem;">
+      <a href="/agents" class="link">Agents</a>
+      <a href="/audits" class="link">Audits</a>
+      <a href="/audits/contamination" class="link">Contamination audit</a>
+      <a href="/backtests" class="link">Backtests</a>
+      <a href="/activity" class="link">Activity aggregate</a>
+    </div>
+  </section>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+  <div>
+    <div class="section-title">Recent system events</div>
+    <div class="card overflow-hidden">
+      {% if recent_events %}
+      <table class="htable">
+        <thead><tr><th>When</th><th>Type</th><th>Message</th></tr></thead>
+        <tbody>
+        {% for e in recent_events %}
+          <tr>
+            <td class="mono dim">{{ e.created_at }}</td>
+            <td><span class="pill {% if e.severity == 'error' %}pill-err{% elif e.severity == 'warn' %}pill-warn{% else %}pill-info{% endif %}">{{ e.event_type }}</span></td>
+            <td>{{ e.message }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No system events recorded.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-title">Recent scheduler commands</div>
+    <div class="card overflow-hidden">
+      {% if recent_commands %}
+      <table class="htable">
+        <thead><tr><th>Job</th><th>Action</th><th>Status</th><th>Requested</th></tr></thead>
+        <tbody>
+        {% for c in recent_commands %}
+          <tr>
+            <td class="mono">{{ c.job_id }}</td>
+            <td>{{ c.action }}</td>
+            <td><span class="pill">{{ c.status }}</span></td>
+            <td class="mono dim">{{ c.requested_at }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty empty-hint">No scheduler commands queued.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

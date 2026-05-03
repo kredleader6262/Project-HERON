@@ -1,0 +1,75 @@
+{% set strip = status_bar %}
+<div class="global-safety-strip" data-testid="global-safety-strip" aria-label="Global Safety Strip">
+  <div class="inner">
+    <div class="safety-head">
+      <div class="micro">Global Safety Strip</div>
+      <a href="/system#operations" class="link">System operations</a>
+    </div>
+    <div class="safety-grid">
+      <div class="safety-item" data-testid="safety-mode">
+        <div class="micro">Trading Mode</div>
+        <div class="safety-value">{{ mode_label|upper }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-pdt">
+        <div class="micro">PDT</div>
+        {% if strip.pdt_count is none %}
+        <div class="safety-value safety-pending">n/a</div>
+        {% else %}
+        <div class="safety-value {% if strip.pdt_count >= 3 %}safety-halt{% elif strip.pdt_count == 2 %}safety-warn{% else %}safety-ok{% endif %}">{{ strip.pdt_count }}/3</div>
+        {% endif %}
+      </div>
+      <div class="safety-item" data-testid="safety-wash-sale">
+        <div class="micro">Wash-sale</div>
+        <div class="safety-value {% if strip.wash_count %}safety-warn{% else %}safety-ok{% endif %}">{{ strip.wash_count }} active</div>
+      </div>
+      <div class="safety-item" data-testid="safety-cost">
+        <div class="micro">Cost</div>
+        <div class="safety-value {% if strip.cost_state == 'halt' %}safety-halt{% elif strip.cost_state == 'warn' %}safety-warn{% else %}safety-ok{% endif %}">${{ "%.2f"|format(strip.mtd) }} / ${{ "%.0f"|format(strip.ceiling) }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-daily-loss">
+        <div class="micro">Daily loss</div>
+        <div class="safety-value {% if strip.daily_loss_used > 0 %}safety-warn{% else %}safety-ok{% endif %}">${{ "%.2f"|format(strip.daily_loss_used) }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-exposure">
+        <div class="micro">Exposure</div>
+        <div class="safety-value">${{ "%.2f"|format(strip.gross_exposure) }} gross</div>
+      </div>
+      <div class="safety-item" data-testid="safety-net-exposure">
+        <div class="micro">Net</div>
+        <div class="safety-value">${{ "%.2f"|format(strip.net_exposure) }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-buying-power">
+        <div class="micro">Buying power</div>
+        <div class="safety-value safety-pending">data pending broker check</div>
+      </div>
+      <div class="safety-item" data-testid="safety-reconciliation">
+        <div class="micro">Reconciliation</div>
+        <div class="safety-value safety-{{ strip.reconciliation.state }}">{{ strip.reconciliation.label }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-broker-api">
+        <div class="micro">Broker/API</div>
+        <div class="safety-value safety-{{ strip.broker_api_health.state }}">{{ strip.broker_api_health.label }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-live-lock">
+        <div class="micro">System Safety Mode</div>
+        <div class="safety-value {% if strip.system_mode == 'SAFE' %}safety-halt{% elif strip.system_mode == 'DERISK' %}safety-warn{% else %}safety-ok{% endif %}">{{ strip.system_mode }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-trust">
+        <div class="micro">LLM trust</div>
+        {% if strip.trust_score is not none %}
+        <div class="safety-value">{{ (strip.trust_score * 100)|round(0)|int }}%</div>
+        {% else %}
+        <div class="safety-value safety-pending">data pending samples</div>
+        {% endif %}
+      </div>
+      <div class="safety-item" data-testid="safety-review-gate">
+        <div class="micro">Review gate</div>
+        <div class="safety-value {% if strip.review_current %}safety-ok{% else %}safety-warn{% endif %}">{{ 'current' if strip.review_current else 'review due' }}</div>
+      </div>
+      <div class="safety-item" data-testid="safety-promotion-gate">
+        <div class="micro">Promotion gate</div>
+        <div class="safety-value safety-{{ strip.promotion_gate.state }}">{{ strip.promotion_gate.label }}</div>
+      </div>
+    </div>
+  </div>
+</div>

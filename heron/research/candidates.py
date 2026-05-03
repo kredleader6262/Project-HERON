@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from heron.config import WATCHLIST
 from heron.journal.candidates import create_candidate, list_candidates
 from heron.journal.ops import log_cost
+from heron.journal.signals import create_or_get_signal, link_signal_candidate
 from heron.research.cost_guard import check_budget
 
 log = logging.getLogger(__name__)
@@ -25,18 +26,18 @@ MIN_SENTIMENT_ABS = 0.2
 DEDUP_WINDOW_HOURS = 24
 
 
-def generate_candidates(conn, classifications, price_data=None, strategy_id=None):
+def generate_candidates(conn, classifications, price_data=None, strategy_id=None, strategy_ids=None):
     """Generate trade candidates from classified articles.
 
     conn: journal DB connection
     classifications: list of dicts from classifier (with relevance, sentiment, tickers)
     price_data: optional dict {ticker: {price, change_pct, volume_ratio}} for context
     strategy_id: which strategy to attribute candidates to
+    strategy_ids: optional iterable of strategies sharing the same upstream Signals
 
     Returns list of candidate IDs created.
     """
-    if not strategy_id:
-        strategy_id = "pead_v1"  # default active strategy
+    strategies = _strategy_ids(strategy_id, strategy_ids)
 
     budget = check_budget(conn)
     if not budget["research_allowed"]:
@@ -50,15 +51,18 @@ def generate_candidates(conn, classifications, price_data=None, strategy_id=None
         log.info("No relevant articles found, no candidates generated")
         return []
 
-    # Dedup: check for existing candidates on same ticker in recent window
-    existing = list_candidates(conn, strategy_id=strategy_id)
-    recent_tickers = set()
+    # Dedup: check for existing candidates on same ticker in recent window.
+    recent_tickers = {sid: set() for sid in strategies}
     cutoff = (datetime.now(timezone.utc) - timedelta(hours=DEDUP_WINDOW_HOURS)).isoformat()
-    for c in existing:
-        if c["created_at"] >= cutoff and c["disposition"] == "pending":
-            recent_tickers.add(c["ticker"])
+    for sid in strategies:
+        for c in list_candidates(conn, strategy_id=sid):
+            if c["created_at"] >= cutoff and c["disposition"] == "pending":
+                recent_tickers[sid].add(c["ticker"])
 
     candidate_ids = []
+    signal_ids = {}
+    produced_strategies = set()
+    strategy_campaigns = {sid: _campaign_for_strategy(conn, sid) for sid in strategies}
     for cls in relevant:
         tickers = cls.get("tickers", [])
         # Only generate candidates for tickers in our watchlist
@@ -67,8 +71,9 @@ def generate_candidates(conn, classifications, price_data=None, strategy_id=None
             continue
 
         for ticker in actionable_tickers:
-            if ticker in recent_tickers:
-                log.debug(f"Skipping {ticker} — pending candidate exists within {DEDUP_WINDOW_HOURS}h")
+            targets = [sid for sid in strategies if ticker not in recent_tickers[sid]]
+            if not targets:
+                log.debug(f"Skipping {ticker} - pending candidate exists within {DEDUP_WINDOW_HOURS}h")
                 continue
 
             score = _compute_score(cls, ticker, price_data)
@@ -78,27 +83,114 @@ def generate_candidates(conn, classifications, price_data=None, strategy_id=None
             side = "buy" if cls.get("sentiment_score", 0) > 0 else "sell"
             thesis = _build_thesis(cls, ticker, price_data)
             context = _build_context(cls, ticker, price_data)
+            signal_type = cls.get("category") or "news"
+            bias = _bias_from_classification(cls)
 
-            cid = create_candidate(
-                conn, strategy_id, ticker,
-                side=side,
-                source="research_local",
-                local_score=score,
-                thesis=thesis,
-                context_json=json.dumps(context),
-            )
-            candidate_ids.append(cid)
-            recent_tickers.add(ticker)
-            log.info(f"Candidate created: {ticker} ({side}) score={score:.2f} [{cls['category']}]")
+            for campaign_id in {strategy_campaigns[sid] for sid in targets if strategy_campaigns[sid]}:
+                key = _signal_key(campaign_id, cls, ticker, signal_type, bias)
+                if key in signal_ids:
+                    continue
+                try:
+                    signal_ids[key] = create_or_get_signal(
+                        conn,
+                        campaign_id=campaign_id,
+                        source="research_local",
+                        finding_ref_json=_finding_ref(cls, ticker),
+                        producing_agent="local_classifier",
+                        producing_model="qwen_local",
+                        ticker=ticker,
+                        signal_type=signal_type,
+                        bias=bias,
+                        thesis=thesis,
+                        confidence=score,
+                        classification=cls.get("sentiment"),
+                        evidence_json=context,
+                    )
+                except Exception as e:
+                    signal_ids[key] = None
+                    log.warning(f"Signal creation failed for {ticker}: {e}")
+
+            for sid in targets:
+                cid = create_candidate(
+                    conn, sid, ticker,
+                    side=side,
+                    source="research_local",
+                    local_score=score,
+                    thesis=thesis,
+                    context_json=json.dumps(context),
+                )
+                candidate_ids.append(cid)
+                produced_strategies.add(sid)
+                recent_tickers[sid].add(ticker)
+                signal_id = signal_ids.get(
+                    _signal_key(strategy_campaigns[sid], cls, ticker, signal_type, bias)
+                )
+                if signal_id:
+                    try:
+                        link_signal_candidate(conn, signal_id, cid, sid, bridge_source="research")
+                    except Exception as e:
+                        log.warning(f"Signal link failed for candidate {cid}: {e}")
+                log.info(f"Candidate created: {ticker} ({side}) score={score:.2f} [{cls['category']}]")
 
     # Log the LLM cost for the classifications that produced candidates
     total_tokens_in = sum(c.get("tokens_in", 0) for c in relevant)
     total_tokens_out = sum(c.get("tokens_out", 0) for c in relevant)
     if total_tokens_in > 0:
-        log_cost(conn, "qwen_local", total_tokens_in, total_tokens_out, 0.00,
-                 strategy_id=strategy_id, task="classification")
+        if len(produced_strategies) <= 1:
+            sid = next(iter(produced_strategies), strategies[0])
+            log_cost(conn, "qwen_local", total_tokens_in, total_tokens_out, 0.00,
+                     strategy_id=sid, task="classification")
+        else:
+            log_cost(conn, "qwen_local", total_tokens_in, total_tokens_out, 0.00,
+                     strategy_id=None, task="classification")
 
     return candidate_ids
+
+
+def _strategy_ids(strategy_id=None, strategy_ids=None):
+    if strategy_ids is not None:
+        ids = list(strategy_ids)
+    elif isinstance(strategy_id, (list, tuple, set)):
+        ids = list(strategy_id)
+    else:
+        ids = [strategy_id or "pead_v1"]
+    return [sid for sid in ids if sid]
+
+
+def _campaign_for_strategy(conn, strategy_id):
+    row = conn.execute("SELECT campaign_id FROM strategies WHERE id=?", (strategy_id,)).fetchone()
+    return row["campaign_id"] if row else None
+
+
+def _bias_from_classification(classification):
+    sentiment_score = classification.get("sentiment_score", 0) or 0
+    sentiment = (classification.get("sentiment") or "").lower()
+    category = (classification.get("category") or "").lower()
+    if sentiment == "risk-off" or (category == "macro" and sentiment_score < 0):
+        return "risk-off"
+    if sentiment_score > 0:
+        return "long_bias"
+    if sentiment_score < 0:
+        return "short_bias"
+    return "informational"
+
+
+def _finding_ref(classification, ticker):
+    return {
+        "article_id": classification.get("article_id"),
+        "ticker": ticker,
+        "category": classification.get("category"),
+    }
+
+
+def _signal_key(campaign_id, classification, ticker, signal_type, bias):
+    return (
+        campaign_id,
+        json.dumps(_finding_ref(classification, ticker), sort_keys=True),
+        ticker,
+        signal_type,
+        bias,
+    )
 
 
 def _compute_score(classification, ticker, price_data=None):

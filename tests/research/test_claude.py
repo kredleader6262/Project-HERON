@@ -341,6 +341,31 @@ class TestEscalation:
         assert result["divergent"] is False
         assert result["agrees"] is True
 
+    @patch("heron.research.escalation.call")
+    def test_audit_works_with_signal_linked_candidate(self, mock_call, journal_conn):
+        from heron.journal.campaigns import create_campaign
+        from heron.journal.signals import create_signal, link_signal_candidate
+        from heron.research.escalation import _audit_sample
+
+        create_campaign(journal_conn, "audit_desk", "Audit Desk", state="ACTIVE")
+        journal_conn.execute("UPDATE strategies SET campaign_id='audit_desk' WHERE id='pead_v1'")
+        journal_conn.commit()
+        cid = create_candidate(journal_conn, "pead_v1", "AAPL", side="buy",
+                               local_score=0.7,
+                               context_json='{"sentiment": "positive", "sentiment_score": 0.6}')
+        sid = create_signal(journal_conn, "audit_desk", "research_local", "earnings",
+                            "long_bias", "AAPL beat", ticker="AAPL")
+        link_signal_candidate(journal_conn, sid, cid, "pead_v1")
+        mock_call.return_value = _mock_claude_response({
+            "agree": True, "conviction": 0.7, "reason": "Reasonable setup"
+        }, cost=0.001)
+
+        result = _audit_sample(journal_conn, cid)
+
+        assert result["agrees"] is True
+        row = journal_conn.execute("SELECT * FROM audits WHERE candidate_id=?", (cid,)).fetchone()
+        assert row is not None
+
 
 # ── Orchestrator Escalation ───────────────────────
 

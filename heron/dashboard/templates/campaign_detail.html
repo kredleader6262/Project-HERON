@@ -1,30 +1,32 @@
 {% extends "base.html" %}
-{% block title %}{{ campaign.name }} — Campaign{% endblock %}
+{% block title %}{{ campaign.display_name }} - Desk{% endblock %}
 {% block content %}
 <div class="page-head">
   <div>
-    <h1>{{ campaign.name }}</h1>
-    <p class="lede mono">{{ campaign.id }} · {{ campaign.mode }} ·
+    <div class="hint"><a class="link" href="/desks">Desks</a> / {{ campaign.display_name }}</div>
+    <h1>{{ campaign.display_name }}</h1>
+    <p class="lede mono">{{ campaign.display_id }} · {{ campaign.mode }} ·
       <span class="pill s-{{ campaign.state }}">{{ campaign.state }}</span>
     </p>
   </div>
   <div style="display:flex; gap:.4rem;">
+    <a class="btn" href="/desk/{{ campaign.desk_route_id }}/signals">Signals</a>
     {% if campaign.state == "DRAFT" %}
-      <form method="post" action="/campaign/{{ campaign.id }}/start">
+      <form method="post" action="/desk/{{ campaign.desk_route_id }}/start">
         <button class="btn btn-primary" type="submit">Activate</button></form>
     {% elif campaign.state == "ACTIVE" %}
-      <form method="post" action="/campaign/{{ campaign.id }}/pause">
+      <form method="post" action="/desk/{{ campaign.desk_route_id }}/pause">
         <button class="btn" type="submit">Pause</button></form>
-      <form method="post" action="/campaign/{{ campaign.id }}/graduate"
-            onsubmit="return confirm('Graduate this campaign? Strategies should already be promoted to LIVE separately.');">
+      <form method="post" action="/desk/{{ campaign.desk_route_id }}/graduate"
+            onsubmit="return confirm('Graduate this Desk? Strategies should already be promoted to LIVE separately.');">
         <button class="btn btn-primary" type="submit">Graduate</button></form>
     {% elif campaign.state == "PAUSED" %}
-      <form method="post" action="/campaign/{{ campaign.id }}/resume">
+      <form method="post" action="/desk/{{ campaign.desk_route_id }}/resume">
         <button class="btn btn-primary" type="submit">Resume</button></form>
     {% endif %}
     {% if campaign.state in ("DRAFT", "ACTIVE", "PAUSED", "GRADUATED") %}
-      <form method="post" action="/campaign/{{ campaign.id }}/retire"
-            onsubmit="return confirm('Retire this campaign?');">
+      <form method="post" action="/desk/{{ campaign.desk_route_id }}/retire"
+            onsubmit="return confirm('Retire this Desk?');">
         <button class="btn" type="submit">Retire</button></form>
     {% endif %}
   </div>
@@ -55,12 +57,39 @@
   </div>
 </div>
 
-{% if campaign.description %}
+{% if campaign.display_description %}
 <div class="card p-4" style="margin-bottom:1rem;">
   <div class="section-title">Hypothesis</div>
-  <div>{{ campaign.description }}</div>
+  <div>{{ campaign.display_description }}</div>
 </div>
 {% endif %}
+
+<div class="card overflow-hidden" style="margin-bottom:1rem;">
+  <div class="card-head">
+    <div class="section-title">Recent Signals</div>
+    <a class="link" href="/desk/{{ campaign.desk_route_id }}/signals">View all</a>
+  </div>
+  {% if signals %}
+  <table class="htable">
+    <thead><tr><th>Signal</th><th>Ticker</th><th>Type</th><th>Bias</th><th>Status</th><th>Generated</th></tr></thead>
+    <tbody>
+    {% for s in signals %}
+      <tr>
+        <td class="mono">#{{ s.id }}</td>
+        <td class="mono">{{ s.ticker or "-" }}</td>
+        <td>{{ s.signal_type }}</td>
+        <td><span class="pill pill-brand">{{ s.bias }}</span></td>
+        <td><span class="pill">{{ s.resolution_status }}</span></td>
+        <td class="dim mono">{{ s.generated_at[:19] }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty"><div class="empty-title">No Signals yet</div>
+    <div class="empty-hint">Research will record Signals upstream of new Candidates.</div></div>
+  {% endif %}
+</div>
 
 <div class="card overflow-hidden" style="margin-bottom:1rem;">
   <div class="card-head">
@@ -87,7 +116,7 @@
   </table>
   {% else %}
   <div class="empty"><div class="empty-title">No strategies attached</div>
-    <div class="empty-hint">Add one via the New Strategy form, selecting this campaign.</div></div>
+    <div class="empty-hint">Add one via the New Strategy form, selecting this Desk.</div></div>
   {% endif %}
 </div>
 

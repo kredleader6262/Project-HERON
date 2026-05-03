@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ campaign.display_name }} Signals - HERON{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="hint"><a class="link" href="/desks">Desks</a> / <a class="link" href="/desk/{{ campaign.desk_route_id }}">{{ campaign.display_name }}</a></div>
+    <h1>Signals</h1>
+    <p class="lede">{{ signals|length }} recorded upstream claims for this Desk.</p>
+  </div>
+  <a class="btn" href="/desk/{{ campaign.desk_route_id }}">Overview</a>
+</div>
+
+<div class="card overflow-hidden">
+{% if signals %}
+<table class="htable">
+  <thead>
+    <tr><th>Signal</th><th>Ticker</th><th>Type</th><th>Bias</th><th>Confidence</th><th>Status</th><th>Generated</th><th>Thesis</th></tr>
+  </thead>
+  <tbody>
+  {% for s in signals %}
+    <tr>
+      <td class="mono">#{{ s.id }}</td>
+      <td class="mono">{{ s.ticker or "-" }}</td>
+      <td>{{ s.signal_type }}</td>
+      <td><span class="pill pill-brand">{{ s.bias }}</span></td>
+      <td class="num">{{ "%.2f"|format(s.confidence) if s.confidence is not none else "-" }}</td>
+      <td><span class="pill">{{ s.resolution_status }}</span></td>
+      <td class="dim mono">{{ s.generated_at[:19] }}</td>
+      <td class="dim" style="max-width: 460px;">{{ (s.thesis or "")[:120] }}{% if (s.thesis or "")|length > 120 %}...{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty">
+  <div class="empty-title">No Signals yet</div>
+  <div class="empty-hint">New research Candidates will link back here when Signal creation succeeds.</div>
+</div>
+{% endif %}
+</div>
+{% endblock %}

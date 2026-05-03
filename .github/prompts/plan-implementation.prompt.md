@@ -1,5 +1,5 @@
 ---
-description: "Plan the next implementation milestone for Project HERON. Reviews current state, picks the next milestone from Project-HERON.md Section 15, and produces an actionable task breakdown."
+description: "Plan the next implementation milestone for Project HERON. Reviews current state, uses Project-HERON-v4.md Section 15 stage boundaries, and produces an actionable task breakdown."
 agent: "agent"
 tools: ["search", "codebase"]
 ---
@@ -9,7 +9,7 @@ You are planning the next implementation milestone for Project HERON, an LLM-aug
 
 ## Context
 
-- Read [Project-HERON.md](../Project-HERON.md) Section 15 for the full roadmap (16 milestones, each independently demo-able).
+- Read [Project-HERON-v4.md](../../Project-HERON-v4.md) Section 15 for current stage boundaries and [Project-HERON-v3.md](../../Project-HERON-v3.md) Section 15 for the historical 16-milestone roadmap.
 - Scan the current codebase to determine what's already built.
 - Read [copilot-instructions.md](../copilot-instructions.md) for coding rules.
 
