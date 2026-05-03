@@ -50,6 +50,3 @@ tools/ollama.log
 # Logs
 logs/
 *.log
-
-# docs screenshots
-docs/screenshots/
